@@ -1,0 +1,24 @@
+// Append-only and hash-chained. Triggers in the migration block UPDATE, DELETE and TRUNCATE.
+// No foreign keys on purpose: audit rows must outlive whatever they describe.
+model AuditLog {
+    id          BigInt   @id @default(autoincrement())
+    workspaceId String?  @map("workspace_id") @db.Uuid
+    businessId  String?  @map("business_id") @db.Uuid
+    actorUserId String?  @map("actor_user_id") @db.Uuid
+    actorVia    String   @default("web") @map("actor_via")
+    action      String
+    entityType  String?  @map("entity_type")
+    entityId    String?  @map("entity_id") @db.Uuid
+    before      Json?
+    after       Json?
+    ip          String?  @db.Inet
+    requestId   String?  @map("request_id")
+    prevHash    Bytes?   @map("prev_hash")
+    rowHash     Bytes    @map("row_hash")
+    at          DateTime @db.Timestamptz(3)
+
+    @@index([workspaceId, id])
+    @@index([actorUserId, id])
+    @@index([entityType, entityId])
+    @@map("audit_logs")
+}

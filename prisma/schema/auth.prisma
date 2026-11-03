@@ -1,0 +1,85 @@
+enum UserStatus {
+    ACTIVE
+    DISABLED
+}
+
+enum MfaFactorType {
+    TOTP
+}
+
+model User {
+    id           String     @id @default(uuid(7)) @db.Uuid
+    email        String     @unique @db.Citext
+    passwordHash String     @map("password_hash")
+    name         String
+    status       UserStatus @default(ACTIVE)
+    mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+    // Bumped to invalidate every access token the user holds.
+    tokenVersion Int        @default(0) @map("token_version")
+    locale       String     @default("en") @db.VarChar(10)
+    digitStyle   String     @default("latin") @map("digit_style") @db.VarChar(10)
+    lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(3)
+    createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    workspaces    UserWorkspace[]
+    mfaFactors    MfaFactor[]
+    sessions      UserSession[]
+    refreshTokens RefreshToken[]
+
+    @@map("users")
+}
+
+model MfaFactor {
+    id              String        @id @default(uuid(7)) @db.Uuid
+    userId          String        @map("user_id") @db.Uuid
+    type            MfaFactorType @default(TOTP)
+    // AES-256-GCM, never stored in plain text.
+    encryptedSecret String        @map("encrypted_secret")
+    confirmedAt     DateTime?     @map("confirmed_at") @db.Timestamptz(3)
+    // Last accepted TOTP time step, so one code cannot be replayed.
+    lastUsedStep    BigInt?       @map("last_used_step")
+    createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+    @@unique([userId, type])
+    @@map("mfa_factors")
+}
+
+// One login on one device. Its id is the refresh token family_id.
+model UserSession {
+    id            String    @id @default(uuid(7)) @db.Uuid
+    userId        String    @map("user_id") @db.Uuid
+    ip            String?   @db.Inet
+    userAgent     String?   @map("user_agent")
+    mfaVerifiedAt DateTime? @map("mfa_verified_at") @db.Timestamptz(3)
+    lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+    revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
+    createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+    refreshTokens RefreshToken[]
+
+    @@index([userId])
+    @@map("user_sessions")
+}
+
+model RefreshToken {
+    id           String    @id @default(uuid(7)) @db.Uuid
+    userId       String    @map("user_id") @db.Uuid
+    familyId     String    @map("family_id") @db.Uuid
+    tokenHash    String    @unique @map("token_hash")
+    expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+    revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+    replacedById String?   @map("replaced_by") @db.Uuid
+    createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    user    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+    session UserSession @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+    @@index([familyId])
+    @@index([userId])
+    @@map("refresh_tokens")
+}

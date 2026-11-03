@@ -1,0 +1,54 @@
+# Local infrastructure for development and tests.
+# pgvector image = plain PostgreSQL plus the extension Phase 8 needs.
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: business_os_postgres
+    environment:
+      POSTGRES_USER: business_os
+      POSTGRES_PASSWORD: business_os
+      POSTGRES_DB: business_os
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U business_os -d business_os"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: business_os_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Not used by code until Phase 3 (documents), started now per the Phase 1 deliverables.
+  # Chainguard's image: minio/minio on Docker Hub and Quay denied anonymous pulls (Nov 2026).
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    container_name: business_os_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: business_os
+      MINIO_ROOT_PASSWORD: business_os_dev
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

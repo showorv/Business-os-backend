@@ -1,0 +1,25 @@
+model Workspace {
+    id        String   @id @default(uuid(7)) @db.Uuid
+    name      String
+    plan      String   @default("private")
+    createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    users UserWorkspace[]
+
+    @@map("workspaces")
+}
+
+model UserWorkspace {
+    userId      String   @map("user_id") @db.Uuid
+    workspaceId String   @map("workspace_id") @db.Uuid
+    isDefault   Boolean  @default(true) @map("is_default")
+    createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+    workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+    @@id([userId, workspaceId])
+    @@index([workspaceId])
+    @@map("user_workspaces")
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+src/generated/
+
+# Secrets. .env.test is committed on purpose: it only holds throwaway local credentials.
+.env
+.env.local
+.env.production
+
+.DS_Store
+*.log
+.claude/settings.local.json
