@@ -61,6 +61,7 @@ model LedgerAccount {
   financialAccount FinancialAccount?
   categories       Category[]
   lines            JournalLine[]
+    monthlyRollups   LedgerMonthlyRollup[]
 
   @@unique([businessId, code])
   @@map("ledger_accounts")
@@ -114,6 +115,8 @@ model JournalEntry {
   postedTransaction   Transaction?    @relation("TransactionJournal")
   reversedTransaction Transaction?    @relation("TransactionReversalJournal")
   reconciliation      Reconciliation?
+    transferOut         IntercompanyTransfer? @relation("IntercompanyFromEntry")
+    transferIn          IntercompanyTransfer? @relation("IntercompanyToEntry")
 
   @@unique([businessId, entryNo])
   @@index([businessId, entryDate(sort: Desc), id(sort: Desc)])

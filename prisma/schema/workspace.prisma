@@ -8,6 +8,7 @@ model Workspace {
   users      UserWorkspace[]
   businesses Business[]
   roles      Role[]
+    exchangeRates ExchangeRate[]
 
   @@map("workspaces")
 }

@@ -9,9 +9,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | 1 | Foundation & auth | ✅ Done |
 | 2 | Multi-business (businesses, members, RBAC, RLS) | ✅ Done |
 | 3 | Accounts & transactions | ✅ Done |
-| **4** | **Double-entry ledger** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 5 | Analytics & reports | ⬜ Next |
-| 6 | Tasks & reminders (BullMQ, email) | ⬜ |
+| 4 | Double-entry ledger | ✅ Done |
+| **5** | **Analytics & reports** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 6 | Tasks & reminders (email, notifications) | ⬜ Next |
 | 7 | Integrations (bKash, banks, CSV) | ⬜ |
 | 8 | AI & RAG | ⬜ |
 | 9 | Frontend | ⬜ |
@@ -59,7 +59,15 @@ npm run db:generate
 npm run dev
 ```
 
-**Step 7. Check it**
+**Step 7. Start the worker, in a second terminal**
+
+```bash
+npm run worker
+```
+
+The worker makes report exports and checks budgets and goals. The API runs without it, but those jobs wait until it starts.
+
+**Step 8. Check it**
 
 - http://localhost:5001/health/ready should show `database`, `redis` and `storage` as `true`
 - http://localhost:5001/api/docs is Swagger UI, where you can try every endpoint (not served in production)
@@ -77,7 +85,8 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | Command | What it does |
 |---|---|
 | `npm run dev` | Starts the API and restarts on file changes |
-| `npm run build` then `npm start` | Production build and run |
+| `npm run worker` | Starts the background worker and restarts on file changes |
+| `npm run build` then `npm start` and `npm run start:worker` | Production build, API and worker |
 | `npm test` | Runs all tests (needs Docker running) |
 | `npm run lint` / `npm run typecheck` | Code checks |
 | `npm run db:migrate` | Creates a new migration after you change `prisma/schema/*` |
@@ -94,18 +103,21 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 ```
 src/
 ├── server.ts              Starts the API and shuts it down cleanly
+├── worker.ts              Starts the background worker: same code, run as a second process
 ├── app.ts                 Express app: the middleware order lives here
 ├── instrument.ts          OpenTelemetry + Sentry, loaded before everything else
-├── lib/                   prisma, redis, logger, storage (S3), rls (the business transaction helper)
+├── lib/                   prisma, redis, logger, storage (S3), queues (BullMQ), rls (the business transaction helper)
 ├── scripts/               verify-audit, verify-ledger, provision-businesses
 ├── types/express.d.ts     Adds req.auth, req.requestId, req.validated
 └── app/
     ├── config/            env.config.ts (validated environment)
     ├── constants/         permissions, categoryTemplates, chartOfAccounts
+    ├── jobs/              outboxRelay, processEvent, eventTypes
+    ├── exports/           reportTable, renderPdf, renderXlsx, renderCsv
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
-    ├── utils/             errors, money, dates, pagination, idempotency, postingRules, sequences, jwt...
+    ├── utils/             errors, money, dates, pagination, idempotency, outbox, postingRules, sequences, jwt...
     └── modules/
         ├── auth/          auth.router / controller / service / validation / interface
         ├── users/         same five files
@@ -122,9 +134,15 @@ src/
         ├── fiscal-periods/   same five files
         ├── journals/         same five files (the posting engine)
         ├── reports/          same five files
-        └── reconciliations/  same five files
+        ├── reconciliations/  same five files
+        ├── analytics/        same five files
+        ├── budgets/          same five files
+        ├── goals/            same five files
+        ├── exchange-rates/   same five files
+        ├── consolidated/     same five files
+        └── report-exports/   same five files
 prisma/
-├── schema/                schema, workspace, auth, business, finance, ledger, document and audit models
+├── schema/                schema, workspace, auth, business, finance, ledger, analytics, document and audit models
 └── migrations/
 postman/                   Collection and the script that generates it
 tests/                     Integration tests against real Postgres and Redis
@@ -180,9 +198,96 @@ requireAuth              who are you?
 
 **Anything that changes money:** never write to `journal_entries` directly. Call `journalsService.post(tx, business, ...)` inside your transaction. **A new transaction type** adds one rule in `src/app/utils/postingRules.ts`.
 
+**Something slow, external or retryable:** don't do it in the request. In the same transaction call `publishEvent(tx, actor, EventType.X, payload)`, add the event's queue in `src/app/jobs/eventTypes.ts`, and handle it in `src/app/jobs/processEvent.ts`. Handlers may run twice, so they must be safe to repeat.
+
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 5
+
+**The goal:** turn the ledger into answers. Dashboards for one business or all of them, budgets and goals with alerts, and files you can hand to an accountant.
+
+### How the pieces connect
+```
+Posting a journal
+ ├─ same transaction ─> journal + monthly rollup (trigger) + outbox event
+ │                                  │                           │
+ │                         dashboards read this          worker publishes it to BullMQ
+ │                                                              │
+ └─ the request finishes here                     budget check, goal check, report export
+```
+
+### Step 1. Monthly rollups
+`ledger_monthly_rollups` holds one row per account per month, so dashboards don't scan every journal line. A **database trigger** updates it whenever journal lines are inserted, which means it can't fall behind, adds no extra query when posting, and can't be forgotten by new code. Closing entries are left out, so a closed year's months keep their figures. `npm run ledger:verify` also checks rollups against the journals.
+
+**Dashboards read rollups. Formal reports still read journals directly.** The two are tested to agree.
+
+### Step 2. The outbox and the worker
+Some work is too slow for a request, but it also can't be lost. So the event is saved **in the same transaction** as the change, and the worker publishes it to BullMQ every 2 seconds:
+
+- **The change fails:** the event rolls back with it, so it never existed.
+- **Redis is down:** events wait in the table and go out when it returns.
+- **The worker crashes:** a job retries with growing delays, up to 5 times (3 for exports). Jobs that still fail stay in the failed list, which acts as the dead-letter queue, and final failures go to Sentry.
+- **An event is delivered twice:** every handler is safe to run again.
+
+Run `npm run worker` alongside the API. Only one is needed, but several can run safely.
+
+### Step 3. Business dashboard
+`GET /analytics/dashboard` gives revenue, expenses, net profit, cash, receivables, payables, a monthly trend with no gaps, top expenses and account balances. It defaults to the fiscal year so far, and accepts `fromMonth` and `toMonth` (`2026-11`). Profit and cash are always shown separately. Every figure states its currency, dates and `POSTED_ACTUALS`.
+
+`GET /analytics/compare` compares revenue, expenses or net profit between two month ranges, with the change and percentage. The percentage is `null` against zero, because a percentage of nothing has no meaning.
+
+### Step 4. Budgets
+A budget covers a month range, with an amount per category. Actuals come **from the ledger** through the account each category posts to, so drafts never count and reversals free the money again.
+
+| Level | Meaning |
+|---|---|
+| `OK` | Below the alert percentage |
+| `NEAR` | At or above `alertPercent` (80 by default) |
+| `REACHED` | Exactly at 100% |
+| `OVER` | Above 100% |
+
+The worker checks after each posting. Each threshold alerts once per line, shows on the budget, and writes a `budget.threshold_reached` event. **Sending that as a notification is Phase 6.** Two categories sharing one ledger account can't be in the same budget, because the ledger can't tell them apart.
+
+### Step 5. Goals
+A goal has a target for revenue, net profit or cash balance over a month range. Progress is worked out when you read it, and the worker marks it `ACHIEVED` when the target is reached. A cash goal uses the balance at its end month, including money from before the goal began.
+
+### Step 6. Consolidated view
+`GET /consolidated/dashboard` adds up every business you have `finance.read` on, with a per-business breakdown. **The server works out the list; the client can't send one.** Archived businesses are left out unless you add `includeArchived=true`.
+
+### Step 7. Exchange rates
+Rates are typed in by you and belong to your workspace (`POST /exchange-rates`). With businesses in different currencies:
+
+1. You must choose a `reportingCurrency`, or get `REPORTING_CURRENCY_REQUIRED`.
+2. The view uses the latest rate on or before the period's last day, stored either way round.
+3. No rate gives `FX_RATE_MISSING`, naming the pair and date, rather than a wrong total.
+4. The response lists every rate and date it used.
+
+Conversion uses whole-number maths, so nothing passes through a float, and it handles currencies like JPY that have no decimals.
+
+### Step 8. Moving money between your businesses
+`POST /consolidated/intercompany-transfers` posts one journal in each business, in a single transaction, so both happen or neither does. It needs `ledger.post` in both.
+
+Shop A pays Shop B ৳30,000:
+
+| Business | Dr | Cr | Amount |
+|---|---|---|---|
+| Shop A | 1300 Due From Other Businesses | 1100 Cash | 30,000 |
+| Shop B | 1100 Cash | 2300 Due To Other Businesses | 30,000 |
+
+Each business's own books show the asset and the debt. **In the consolidated view they cancel out**, so group assets, liabilities, revenue, profit and cash don't change, and the eliminated amount is shown. It can only cancel when you can see both businesses. To undo a transfer, make another one in the opposite direction.
+
+### Step 9. Report exports
+`POST /report-exports` queues the trial balance, P&L, balance sheet or cash flow as PDF, Excel or CSV, in English or Bangla. It returns `202` straight away; check its status, then get a 5-minute download link.
+
+| Format | What it does |
+|---|---|
+| **PDF** | Rendered by headless Chrome with an embedded Noto Sans Bengali font, because simple PDF libraries break Bangla conjuncts. Uses `formatMoney`: ৳, lakh and crore grouping, Bangla digits if chosen. JavaScript is off and nothing loads from outside |
+| **Excel** | Real numbers people can add up. An amount too large to be exact stays as text |
+| **CSV** | UTF-8 with a BOM, so Excel reads Bangla. Headers translate, values stay plain. A name starting with `=`, `+`, `-` or `@` is neutralised, so it can't run as a formula |
+
+Exporting needs `finance.read` and recent MFA. The worker checks access again when it runs, so someone removed in the meantime gets no file. Language defaults to the profile of whoever asked.
 
 ## What was built in Phase 4
 
@@ -600,6 +705,19 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | GET | `/businesses/:businessId/documents` | `documents.read` | List documents |
 | GET | `/businesses/:businessId/documents/:documentId/download` | `documents.read` | Get a download link |
 | DELETE | `/businesses/:businessId/documents/:documentId` | `documents.write` | Soft delete |
+| GET | `.../analytics/dashboard?fromMonth=&toMonth=` | `finance.read` | One business's dashboard |
+| GET | `.../analytics/compare?metric=&fromMonth=&toMonth=&compareFromMonth=&compareToMonth=` | `finance.read` | Compare two ranges |
+| POST / GET | `.../budgets` | `finance.write` / `finance.read` | Create or list budgets |
+| GET / PATCH | `.../budgets/:budgetId` | `finance.read` / `finance.write` | Against actuals, or rename and archive |
+| POST | `.../budgets/:budgetId/lines` | `finance.write` | Add or change a line |
+| POST / GET | `.../goals` | `finance.write` / `finance.read` | Create or list goals |
+| GET / PATCH | `.../goals/:goalId` | `finance.read` / `finance.write` | Progress, or edit and cancel |
+| POST / GET | `.../report-exports` | `finance.read` (+ recent MFA to create) | Queue or list exports |
+| GET | `.../report-exports/:exportId` | `finance.read` | Check status |
+| GET | `.../report-exports/:exportId/download` | `finance.read` + recent MFA | Download link |
+| POST / GET | `/exchange-rates` | Bearer | Save or list your workspace's rates |
+| GET | `/consolidated/dashboard?fromMonth=&toMonth=&reportingCurrency=` | Bearer | All businesses you may read |
+| POST / GET | `/consolidated/intercompany-transfers` | `ledger.post` in both / Bearer | Move money between businesses, or list |
 | GET / POST | `/businesses/:businessId/ledger-accounts` | `finance.read` / `ledger.post` | List or add accounts |
 | PATCH | `.../ledger-accounts/:ledgerAccountId` | `ledger.post` | Edit an account |
 | GET | `/businesses/:businessId/fiscal-periods` | `finance.read` | List periods |
@@ -635,11 +753,11 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 
 ### Test every endpoint with Postman
 
-`postman/Business_OS.postman_collection.json` has 178 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
+`postman/Business_OS.postman_collection.json` has 208 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
 
 **In the Postman app:**
 1. Click **Import** and choose that file.
-2. Make sure `npm run dev` is running. The collection's `baseUrl` variable defaults to `http://localhost:5001`.
+2. Make sure `npm run dev` is running, and `npm run worker` too if you want exports to finish. The collection's `baseUrl` variable defaults to `http://localhost:5001`.
 3. Open the collection, click **Run**, and keep the requests in order.
 
 **From the terminal:**
@@ -655,6 +773,14 @@ docker exec business_os_redis redis-cli flushall
 ```
 
 ## How it was verified
+
+**Phase 5:**
+- **325 integration tests pass** (63 of them new), covering dashboards against the formal reports, budget and goal thresholds firing once, the outbox failure cases, and consolidation.
+- **One test runs a real BullMQ worker:** a posting becomes an event, then a job, then a budget alert.
+- **The real API and worker were run together:** all 208 Postman requests pass, reaching all 95 documented operations. The worker finished 14 jobs with none failed, and shut down cleanly.
+- **Exports:** downloaded files were opened and checked, including the BOM, Excel values and hostile names. **A Bangla PDF was checked by eye**, and conjuncts, Bangla digits and lakh grouping all render correctly.
+- **As a role like Neon's owner:** the suite passes. Dropping the rollup trigger or switching off RLS on budgets makes the tests fail, as they should.
+- **Upgrade:** the migration was applied to a Phase 4 database with posted journals, the rollups were backfilled correctly, and `ledger:verify` found no problems.
 
 **Phase 4 (the gate):**
 - **262 integration tests pass** (68 of them new), including exact Dr and Cr for each posting rule, simultaneous posting, reversals, approvals, period rules, year-end close, all four reports and reconciliation.
@@ -684,14 +810,16 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The Phase 4 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. The Phase 2 and 3 migrations did work on Neon.
+- **The Phase 5 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. Phases 2, 3 and 4's migrations did work on Neon.
+- **Phase 5's timing on Neon** hasn't been measured. Posting adds one query for the outbox event, on top of the 8.3 seconds measured in Phase 4.
+- **Chrome on GitHub's runners:** the CI workflow installs Chrome and sets `CHROME_NO_SANDBOX`, but hasn't been seen to run.
 - **Cloudflare R2 or S3** have not been tried. Uploads were tested on MinIO only.
 - **GitHub Actions results** have not been checked.
 - **Real Sentry and Grafana accounts** have not been connected.
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. Your existing business needs the provision step, or posting returns `BUSINESS_NOT_PROVISIONED`.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. Neon has the Phase 4 tables, but `db:provision` hadn't been run when last checked, so your existing business can't post until it is.
 2. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
 3. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
 
@@ -708,6 +836,8 @@ docker exec business_os_redis redis-cli flushall
 | Reconciliation difference on 6900 or 4900 | Always 6900 | 4900 is Sales Returns, so a bank difference shouldn't reduce sales |
 | A `reconciled_at` column on journal lines | A separate `reconciliation_lines` table | Journal lines can't change, by design |
 | Period check when saving a draft | Period check when posting | A draft doesn't touch the books, so it can be saved for any date |
+| Materialized views refreshed by a worker | A rollup table kept in step by a trigger | Materialized views refresh all businesses at once and can't use RLS. This is per-business, RLS-protected and never stale |
+| Intercompany as two linked transactions | Two linked journals, plus an `intercompany_transfers` row | A transaction needs a category and a single account. The journals are what matter for the books |
 | `X-Business-Id` header mentioned in one diagram | Business id in the URL | The document's other sections use the URL, and it keeps routes explicit |
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
@@ -716,20 +846,22 @@ docker exec business_os_redis redis-cli flushall
 **Moved to a later phase:**
 | Item | Phase | Why |
 |---|---|---|
-| Foreign-currency posting and FX rates | 5 | Accounts in another currency can exist, but posting returns `FOREIGN_CURRENCY_NOT_SUPPORTED`. The journal columns are ready |
-| Transactional outbox and `transaction.posted` events | 5 | Nothing consumes them yet. Rollups can be rebuilt from journals, so nothing is lost |
+| Foreign-currency accounts inside a business | When needed | **Moved from Phase 5.** Accounts in another currency can exist, but posting returns `FOREIGN_CURRENCY_NOT_SUPPORTED`. A business in USD works, and consolidation converts it. Doing this properly needs exchange gains and losses, which no phase covers |
+| Delivering budget and goal alerts | 6 | Events and alerts are saved now. Notifications arrive in Phase 6 |
+| Bull Board queue screen | 6 | Admin screen for queues. Failed jobs are in Redis and logs until then |
+| Fetching exchange rates automatically | When needed | You type them in, which keeps every figure traceable |
+| Exports of the consolidated view | When needed | The document's exports are per business |
+| Removing old export files and published outbox rows | 6 | Needs scheduled jobs. Harmless until then |
 | Statement lines, importing and auto-matching | 7 | Reconciliation works by hand until then |
 | Notifying approvers | 6 | Needs notifications. Pending items can be listed with `status=PENDING_APPROVAL` |
 | Nightly `ledger:verify` | 6 | Needs background jobs. Run it by hand until then |
 | Invoices, bills, and receivable and payable tracking | Future | Accrual-ready: the accounts exist, and manual journals work today |
-| Intercompany transfers between your businesses | 5 | The Due To and Due From accounts are seeded. Consolidation is where they matter |
 | Invitation emails | 6 | Needs email delivery. The token is returned to the inviter for now |
 | Malware scanning and OCR | 8 | `scan_status` is `NOT_SCANNED` until the ingestion pipeline exists |
 | Cleaning up abandoned uploads and expired idempotency keys | 6 | Needs background jobs. They do no harm until then |
 | Enforcing `enabledModules` per business | SaaS | The setting is stored, but nothing reads it yet |
 | Counterparties (customers and suppliers) | Not in any phase's list | The ER diagram has the table, but no phase includes the module. `counterparty_id` is added when it's built |
 | Custom fields | Not in any phase's list | Section 8.4 describes them, but no phase includes them |
-| Consolidated "all businesses" endpoints | 5 | Listed under Analytics in the roadmap |
 | Plan limits and custom roles | SaaS | The tables already allow custom roles; no endpoint yet |
 | Lockout and token-reuse emails, password reset | 6 | Needs email delivery. Until then these events go to the security log and audit |
 | Nightly audit check | 6 | Needs BullMQ. Run `npm run audit:verify` by hand until then |
@@ -741,6 +873,6 @@ docker exec business_os_redis redis-cli flushall
 
 **Known gap:** the document has no MFA recovery codes. Since password reset also waits for Phase 6, a user who loses their authenticator today can only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
-## Before Phase 5
+## Before Phase 6
 
-The ledger gate is green, so Phases 5, 6 and 7 can start. Phase 5 adds rollups, consolidated "all businesses" APIs, FX conversion, budgets, goals and PDF, Excel and CSV exports, all reading from the ledger.
+Phase 6 adds tasks, RRULE reminders with a reconciler, overdue scans, and email, in-app and push notifications, which also delivers the budget and goal alerts already being saved. It also adds recurring transactions, salary schedules, and nightly `audit:verify` and `ledger:verify` jobs. The worker it builds on already exists. Phase 7 (integrations) can run alongside it.

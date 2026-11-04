@@ -42,6 +42,10 @@ const envSchema = z
     S3_SECRET_KEY: z.string().min(1),
     S3_BUCKET: z.string().min(3),
 
+    // Containers and CI runners often can't start Chrome's sandbox. Safe here, because the PDF page
+    // runs no scripts and loads nothing from outside.
+    CHROME_NO_SANDBOX: z.stringbool().default(false),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })

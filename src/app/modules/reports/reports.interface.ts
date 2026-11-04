@@ -19,4 +19,5 @@ export interface LedgerCheck {
   businessId: string;
   unbalancedEntries: number;
   accountsOutOfStep: number;
+  rollupsOutOfStep: number;
 }

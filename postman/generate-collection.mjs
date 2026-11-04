@@ -393,6 +393,57 @@ pm.collectionVariables.set("oneLineId", r.unmatchedLines[0].id);`] }),
     req("Close with an adjustment", "POST", `${FIN}/reconciliations/{{reconciliationId}}/close`, { auth: TOKEN, body: { adjust: true }, tests: [status(200), `const r = pm.response.json().data;
 pm.test("closed, difference recorded", () => { pm.expect(r.status).to.eql("CLOSED"); pm.expect(r.differenceMinor).to.eql("-10000"); });`] }),
   ]},
+
+  // Phase 5. Reads the books built up in the folders above.
+  { name: "27. Analytics", item: [
+    req("Business dashboard", "GET", `${FIN}/analytics/dashboard?fromMonth=2026-11&toMonth=2026-11`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("states what it is, and matches the P&L", () => { pm.expect(d.basis).to.eql("POSTED_ACTUALS"); pm.expect(d.revenueMinor).to.eql("500000"); pm.expect(d.netProfitMinor).to.eql("-1728500"); pm.expect(d.trend.length).to.eql(1); pm.expect(d.topExpenses[0].code).to.eql("6100"); });`] }),
+    req("Compare two months", "GET", `${FIN}/analytics/compare?metric=REVENUE&fromMonth=2026-11&toMonth=2026-11&compareFromMonth=2026-10&compareToMonth=2026-10`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("no percentage against zero", () => { pm.expect(d.changeMinor).to.eql("500000"); pm.expect(d.changePercent).to.eql(null); });`] }),
+    req("Bad range", "GET", `${FIN}/analytics/dashboard?fromMonth=2026-12&toMonth=2026-01`, { auth: TOKEN, tests: [status(422), errCode("INVALID_MONTH_RANGE")] }),
+    req("Outsider gets 404", "GET", `${FIN}/analytics/dashboard`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "28. Budgets", item: [
+    req("Create a budget", "POST", `${FIN}/budgets`, { auth: TOKEN, body: { name: "November", startMonth: "2026-11", endMonth: "2026-11", lines: [{ categoryId: "{{rentId}}", amountMinor: "5000000", alertPercent: 40 }] }, tests: [status(201), `pm.collectionVariables.set("budgetId", pm.response.json().data.id);`] }),
+    req("Read budget against actuals", "GET", `${FIN}/budgets/{{budgetId}}`, { auth: TOKEN, tests: [status(200), `const l = pm.response.json().data.lines[0];
+pm.test("rent 200,000 + 2,000,000 of 5,000,000", () => { pm.expect(l.actualMinor).to.eql("2200000"); pm.expect(l.usedPercent).to.eql("44.00"); pm.expect(l.level).to.eql("NEAR"); });`] }),
+    req("Change a line", "POST", `${FIN}/budgets/{{budgetId}}/lines`, { auth: TOKEN, body: { categoryId: "{{rentId}}", amountMinor: "6000000", alertPercent: 80 }, tests: [status(200)] }),
+    req("List budgets", "GET", `${FIN}/budgets`, { auth: TOKEN, tests: [status(200), `pm.test("one budget", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+    req("Archive the budget", "PATCH", `${FIN}/budgets/{{budgetId}}`, { auth: TOKEN, body: { status: "ARCHIVED" }, tests: [status(200)] }),
+  ]},
+  { name: "29. Goals", item: [
+    req("Create a goal", "POST", `${FIN}/goals`, { auth: TOKEN, body: { name: "Revenue target", metric: "REVENUE", targetMinor: "1000000", startMonth: "2026-11", endMonth: "2026-12" }, tests: [status(201), `const g = pm.response.json().data;
+pm.test("half way", () => pm.expect(g.progressPercent).to.eql("50.00"));
+pm.collectionVariables.set("goalId", g.id);`] }),
+    req("Read the goal", "GET", `${FIN}/goals/{{goalId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("List goals", "GET", `${FIN}/goals?status=ACTIVE`, { auth: TOKEN, tests: [status(200)] }),
+    req("Change the target", "PATCH", `${FIN}/goals/{{goalId}}`, { auth: TOKEN, body: { targetMinor: "2000000" }, tests: [status(200), `pm.test("now a quarter", () => pm.expect(pm.response.json().data.progressPercent).to.eql("25.00"));`] }),
+  ]},
+  { name: "30. Consolidated", item: [
+    req("A second business, in dollars", "POST", B, { auth: TOKEN, body: { name: "Finance USD", type: "SERVICES", baseCurrency: "USD" }, tests: [status(201), `pm.collectionVariables.set("usdBusinessId", pm.response.json().data.id);`] }),
+    req("Needs a reporting currency", "GET", "/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11", { auth: TOKEN, tests: [status(422), errCode("REPORTING_CURRENCY_REQUIRED")] }),
+    req("Needs a rate", "GET", "/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT", { auth: TOKEN, tests: [status(422), errCode("FX_RATE_MISSING")] }),
+    req("Save a rate", "POST", "/api/v1/exchange-rates", { auth: TOKEN, body: { fromCurrency: "USD", toCurrency: "BDT", rateDate: "2026-11-30", rate: "120.5" }, tests: [status(200)] }),
+    req("List rates", "GET", "/api/v1/exchange-rates", { auth: TOKEN, tests: [status(200), `pm.test("one rate", () => pm.expect(pm.response.json().data[0].rate).to.eql("120.500000"));`] }),
+    req("Consolidated dashboard", "GET", "/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT", { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("states its currency and rate", () => { pm.expect(d.reportingCurrency).to.eql("BDT"); pm.expect(d.businesses.length).to.eql(2); pm.expect(d.fxRates[0].rate).to.eql("120.500000"); pm.expect(d.totals.revenueMinor).to.eql("500000"); });`] }),
+    req("A second BDT business", "POST", B, { auth: TOKEN, body: { name: "Finance Two", type: "RETAIL" }, tests: [status(201), `pm.collectionVariables.set("secondBusinessId", pm.response.json().data.id);`] }),
+    req("Its Cash account", "GET", `${B}/{{secondBusinessId}}/accounts`, { auth: TOKEN, tests: [status(200), `pm.collectionVariables.set("secondCashId", pm.response.json().data[0].id);`] }),
+    req("Open its 2026 year", "POST", `${B}/{{secondBusinessId}}/fiscal-periods/years`, { auth: TOKEN, body: { fiscalYear: 2026 }, tests: [status(201)] }),
+    req("Move money between businesses", "POST", "/api/v1/consolidated/intercompany-transfers", { auth: TOKEN, body: { fromBusinessId: "{{finBusinessId}}", fromAccountId: "{{bankId}}", toBusinessId: "{{secondBusinessId}}", toAccountId: "{{secondCashId}}", amountMinor: "100000", transferDate: "2026-11-20" }, tests: [status(201)] }),
+    req("List transfers", "GET", "/api/v1/consolidated/intercompany-transfers", { auth: TOKEN, tests: [status(200), `pm.test("one transfer", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+    req("Group totals don't change", "GET", "/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT", { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("eliminated", () => { pm.expect(d.eliminatedIntercompanyMinor).to.eql("100000"); pm.expect(d.totals.revenueMinor).to.eql("500000"); });`] }),
+  ]},
+  { name: "31. Report exports", item: [
+    req("Request a CSV", "POST", `${FIN}/report-exports`, { auth: TOKEN, body: { report: "TRIAL_BALANCE", format: "CSV", asOf: "2026-11-30", locale: "bn-BD" }, tests: [status(202), `const e = pm.response.json().data;
+pm.test("queued", () => pm.expect(e.status).to.eql("QUEUED"));
+pm.collectionVariables.set("exportId", e.id);`] }),
+    req("Missing dates are refused", "POST", `${FIN}/report-exports`, { auth: TOKEN, body: { report: "CASH_FLOW", format: "PDF" }, tests: [status(422)] }),
+    req("List exports", "GET", `${FIN}/report-exports`, { auth: TOKEN, tests: [status(200)] }),
+    req("Check the status", "GET", `${FIN}/report-exports/{{exportId}}`, { auth: TOKEN, tests: [status(200), `pm.test("has a status", () => pm.expect(["QUEUED", "RUNNING", "READY"]).to.include(pm.response.json().data.status));`] }),
+    req("Download link, once ready", "GET", `${FIN}/report-exports/{{exportId}}/download`, { auth: TOKEN, tests: [`pm.test("ready with a link, or not ready yet", () => pm.expect([200, 409]).to.include(pm.response.code));`] }),
+  ]},
 ];
 
 fs.writeFileSync(out, JSON.stringify({

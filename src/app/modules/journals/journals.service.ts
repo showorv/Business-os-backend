@@ -6,6 +6,7 @@ import { Permission } from "../../constants/permissions.js";
 import { fromDbDate, todayInTimezone, toDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode, isUniqueViolation } from "../../utils/errors.js";
 import { type IdempotencyRequest, withIdempotency } from "../../utils/idempotency.js";
+import { EventType, publishEvent } from "../../utils/outbox.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
 import { credit, debit, swapSides, totals, type JournalLineInput } from "../../utils/postingRules.js";
 import type { RequestContext } from "../../utils/requestContext.js";
@@ -95,6 +96,9 @@ const post = async (tx: Prisma.TransactionClient, actor: LedgerActor & FiscalAct
   });
 
   await applyToAccountBalances(tx, actor.businessId, input.lines);
+
+  // The monthly rollup needs nothing here: a trigger on journal_lines keeps it in step.
+  await publishEvent(tx, actor, EventType.JOURNAL_POSTED, { entryId: entry.id, entryDate: fromDbDate(input.entryDate) });
   return entry;
 };
 

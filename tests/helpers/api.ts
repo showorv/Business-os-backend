@@ -180,3 +180,22 @@ export const ledgerIdByCode = async (base: string, auth: string, code: string) =
   const res = await api().get(`${base}/ledger-accounts`).set("Authorization", auth);
   return res.body.data.find((account: { code: string }) => account.code === code).id as string;
 };
+
+// What the worker does, run inline so a test can check the result straight away.
+export const runPendingEvents = async () => {
+  const { prisma } = await import("../../src/lib/prisma.js");
+  const { processEvent } = await import("../../src/app/jobs/processEvent.js");
+  const events = await prisma.outboxEvent.findMany({ where: { publishedAt: null }, orderBy: { id: "asc" } });
+  for (const event of events) {
+    await prisma.outboxEvent.update({ where: { id: event.id }, data: { publishedAt: new Date() } });
+    await processEvent({
+      eventId: event.id.toString(),
+      type: event.type,
+      workspaceId: event.workspaceId,
+      businessId: event.businessId,
+      actorUserId: event.actorUserId,
+      payload: event.payload as Record<string, string>,
+    });
+  }
+  return events.length;
+};

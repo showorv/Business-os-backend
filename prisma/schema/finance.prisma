@@ -86,6 +86,7 @@ model Category {
   ledgerAccount LedgerAccount? @relation(fields: [ledgerAccountId], references: [id])
   business      Business       @relation(fields: [businessId], references: [id])
   transactions  Transaction[]
+    budgetLines   BudgetLine[]
 
   @@unique([businessId, type, name])
   @@map("categories")

@@ -6358,6 +6358,1037 @@
           }
         }
       ]
+    },
+    {
+      "name": "27. Analytics",
+      "item": [
+        {
+          "name": "Business dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"states what it is, and matches the P&L\", () => { pm.expect(d.basis).to.eql(\"POSTED_ACTUALS\"); pm.expect(d.revenueMinor).to.eql(\"500000\"); pm.expect(d.netProfitMinor).to.eql(\"-1728500\"); pm.expect(d.trend.length).to.eql(1); pm.expect(d.topExpenses[0].code).to.eql(\"6100\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/analytics/dashboard?fromMonth=2026-11&toMonth=2026-11"
+          }
+        },
+        {
+          "name": "Compare two months",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"no percentage against zero\", () => { pm.expect(d.changeMinor).to.eql(\"500000\"); pm.expect(d.changePercent).to.eql(null); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/analytics/compare?metric=REVENUE&fromMonth=2026-11&toMonth=2026-11&compareFromMonth=2026-10&compareToMonth=2026-10"
+          }
+        },
+        {
+          "name": "Bad range",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is INVALID_MONTH_RANGE\", () => pm.expect(pm.response.json().error.code).to.eql(\"INVALID_MONTH_RANGE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/analytics/dashboard?fromMonth=2026-12&toMonth=2026-01"
+          }
+        },
+        {
+          "name": "Outsider gets 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/analytics/dashboard"
+          }
+        }
+      ]
+    },
+    {
+      "name": "28. Budgets",
+      "item": [
+        {
+          "name": "Create a budget",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"budgetId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"November\",\n  \"startMonth\": \"2026-11\",\n  \"endMonth\": \"2026-11\",\n  \"lines\": [\n    {\n      \"categoryId\": \"{{rentId}}\",\n      \"amountMinor\": \"5000000\",\n      \"alertPercent\": 40\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/budgets"
+          }
+        },
+        {
+          "name": "Read budget against actuals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const l = pm.response.json().data.lines[0];",
+                  "pm.test(\"rent 200,000 + 2,000,000 of 5,000,000\", () => { pm.expect(l.actualMinor).to.eql(\"2200000\"); pm.expect(l.usedPercent).to.eql(\"44.00\"); pm.expect(l.level).to.eql(\"NEAR\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/budgets/{{budgetId}}"
+          }
+        },
+        {
+          "name": "Change a line",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"6000000\",\n  \"alertPercent\": 80\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/budgets/{{budgetId}}/lines"
+          }
+        },
+        {
+          "name": "List budgets",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one budget\", () => pm.expect(pm.response.json().data.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/budgets"
+          }
+        },
+        {
+          "name": "Archive the budget",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"ARCHIVED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/budgets/{{budgetId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "29. Goals",
+      "item": [
+        {
+          "name": "Create a goal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const g = pm.response.json().data;",
+                  "pm.test(\"half way\", () => pm.expect(g.progressPercent).to.eql(\"50.00\"));",
+                  "pm.collectionVariables.set(\"goalId\", g.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Revenue target\",\n  \"metric\": \"REVENUE\",\n  \"targetMinor\": \"1000000\",\n  \"startMonth\": \"2026-11\",\n  \"endMonth\": \"2026-12\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/goals"
+          }
+        },
+        {
+          "name": "Read the goal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/goals/{{goalId}}"
+          }
+        },
+        {
+          "name": "List goals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/goals?status=ACTIVE"
+          }
+        },
+        {
+          "name": "Change the target",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"now a quarter\", () => pm.expect(pm.response.json().data.progressPercent).to.eql(\"25.00\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"targetMinor\": \"2000000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/goals/{{goalId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "30. Consolidated",
+      "item": [
+        {
+          "name": "A second business, in dollars",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"usdBusinessId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Finance USD\",\n  \"type\": \"SERVICES\",\n  \"baseCurrency\": \"USD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses"
+          }
+        },
+        {
+          "name": "Needs a reporting currency",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is REPORTING_CURRENCY_REQUIRED\", () => pm.expect(pm.response.json().error.code).to.eql(\"REPORTING_CURRENCY_REQUIRED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11"
+          }
+        },
+        {
+          "name": "Needs a rate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is FX_RATE_MISSING\", () => pm.expect(pm.response.json().error.code).to.eql(\"FX_RATE_MISSING\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT"
+          }
+        },
+        {
+          "name": "Save a rate",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromCurrency\": \"USD\",\n  \"toCurrency\": \"BDT\",\n  \"rateDate\": \"2026-11-30\",\n  \"rate\": \"120.5\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/exchange-rates"
+          }
+        },
+        {
+          "name": "List rates",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one rate\", () => pm.expect(pm.response.json().data[0].rate).to.eql(\"120.500000\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/exchange-rates"
+          }
+        },
+        {
+          "name": "Consolidated dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"states its currency and rate\", () => { pm.expect(d.reportingCurrency).to.eql(\"BDT\"); pm.expect(d.businesses.length).to.eql(2); pm.expect(d.fxRates[0].rate).to.eql(\"120.500000\"); pm.expect(d.totals.revenueMinor).to.eql(\"500000\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT"
+          }
+        },
+        {
+          "name": "A second BDT business",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"secondBusinessId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Finance Two\",\n  \"type\": \"RETAIL\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses"
+          }
+        },
+        {
+          "name": "Its Cash account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"secondCashId\", pm.response.json().data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{secondBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Open its 2026 year",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscalYear\": 2026\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{secondBusinessId}}/fiscal-periods/years"
+          }
+        },
+        {
+          "name": "Move money between businesses",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromBusinessId\": \"{{finBusinessId}}\",\n  \"fromAccountId\": \"{{bankId}}\",\n  \"toBusinessId\": \"{{secondBusinessId}}\",\n  \"toAccountId\": \"{{secondCashId}}\",\n  \"amountMinor\": \"100000\",\n  \"transferDate\": \"2026-11-20\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/consolidated/intercompany-transfers"
+          }
+        },
+        {
+          "name": "List transfers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one transfer\", () => pm.expect(pm.response.json().data.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/consolidated/intercompany-transfers"
+          }
+        },
+        {
+          "name": "Group totals don't change",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"eliminated\", () => { pm.expect(d.eliminatedIntercompanyMinor).to.eql(\"100000\"); pm.expect(d.totals.revenueMinor).to.eql(\"500000\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/consolidated/dashboard?fromMonth=2026-11&toMonth=2026-11&reportingCurrency=BDT"
+          }
+        }
+      ]
+    },
+    {
+      "name": "31. Report exports",
+      "item": [
+        {
+          "name": "Request a CSV",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));",
+                  "const e = pm.response.json().data;",
+                  "pm.test(\"queued\", () => pm.expect(e.status).to.eql(\"QUEUED\"));",
+                  "pm.collectionVariables.set(\"exportId\", e.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"report\": \"TRIAL_BALANCE\",\n  \"format\": \"CSV\",\n  \"asOf\": \"2026-11-30\",\n  \"locale\": \"bn-BD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/report-exports"
+          }
+        },
+        {
+          "name": "Missing dates are refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"report\": \"CASH_FLOW\",\n  \"format\": \"PDF\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/report-exports"
+          }
+        },
+        {
+          "name": "List exports",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/report-exports"
+          }
+        },
+        {
+          "name": "Check the status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"has a status\", () => pm.expect([\"QUEUED\", \"RUNNING\", \"READY\"]).to.include(pm.response.json().data.status));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/report-exports/{{exportId}}"
+          }
+        },
+        {
+          "name": "Download link, once ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"ready with a link, or not ready yet\", () => pm.expect([200, 409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/report-exports/{{exportId}}/download"
+          }
+        }
+      ]
     }
   ]
 }

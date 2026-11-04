@@ -20,7 +20,9 @@
     "postman:build": "node postman/generate-collection.mjs",
     "test:postman": "newman run postman/Business_OS.postman_collection.json",
     "db:provision": "tsx src/scripts/provision-businesses.ts",
-    "ledger:verify": "tsx src/scripts/verify-ledger.ts"
+    "ledger:verify": "tsx src/scripts/verify-ledger.ts",
+    "worker": "tsx watch --import ./src/instrument.ts src/worker.ts",
+    "start:worker": "node --import ./dist/instrument.js dist/worker.js"
   },
   "keywords": [],
   "author": "",
@@ -30,6 +32,7 @@
     "@asteasolutions/zod-to-openapi": "^9.1.0",
     "@aws-sdk/client-s3": "^3.1161.0",
     "@aws-sdk/s3-request-presigner": "^3.1161.0",
+    "@fontsource/noto-sans-bengali": "^5.3.0",
     "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
@@ -48,9 +51,11 @@
     "@sentry/node": "^11.10.0",
     "@types/express": "^5.0.6",
     "bcrypt": "^6.0.0",
+    "bullmq": "^6.6.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",
+    "exceljs": "^4.4.0",
     "express": "^5.3.0",
     "file-type": "^22.3.0",
     "helmet": "^8.3.0",
@@ -60,6 +65,7 @@
     "pg": "^8.23.1",
     "pino": "^10.4.0",
     "pino-http": "^11.0.0",
+    "puppeteer": "^25.16.0",
     "swagger-ui-express": "^5.0.1",
     "zod": "^4.6.7"
   },

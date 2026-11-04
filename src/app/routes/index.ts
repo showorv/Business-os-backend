@@ -1,16 +1,22 @@
 import { Router } from "express";
 import { accountsRouter } from "../modules/accounts/accounts.router.js";
+import { analyticsRouter } from "../modules/analytics/analytics.router.js";
 import { auditRouter, businessAuditRouter } from "../modules/audit/audit.router.js";
 import { authRouter } from "../modules/auth/auth.router.js";
+import { budgetsRouter } from "../modules/budgets/budgets.router.js";
 import { businessesRouter } from "../modules/businesses/businesses.router.js";
 import { categoriesRouter } from "../modules/categories/categories.router.js";
+import { consolidatedRouter } from "../modules/consolidated/consolidated.router.js";
 import { documentsRouter } from "../modules/documents/documents.router.js";
+import { exchangeRatesRouter } from "../modules/exchange-rates/exchange-rates.router.js";
 import { fiscalPeriodsRouter } from "../modules/fiscal-periods/fiscal-periods.router.js";
+import { goalsRouter } from "../modules/goals/goals.router.js";
 import { businessInvitationsRouter, invitationsRouter } from "../modules/invitations/invitations.router.js";
 import { journalsRouter } from "../modules/journals/journals.router.js";
 import { ledgerAccountsRouter } from "../modules/ledger-accounts/ledger-accounts.router.js";
 import { membersRouter } from "../modules/members/members.router.js";
 import { reconciliationsRouter } from "../modules/reconciliations/reconciliations.router.js";
+import { reportExportsRouter } from "../modules/report-exports/report-exports.router.js";
 import { reportsRouter } from "../modules/reports/reports.router.js";
 import { rolesRouter } from "../modules/roles/roles.router.js";
 import { transactionsRouter } from "../modules/transactions/transactions.router.js";
@@ -23,6 +29,8 @@ const moduleRoutes = [
   { path: "/audit", router: auditRouter },
   { path: "/roles", router: rolesRouter },
   { path: "/invitations", router: invitationsRouter },
+  { path: "/exchange-rates", router: exchangeRatesRouter },
+  { path: "/consolidated", router: consolidatedRouter },
   { path: "/businesses", router: businessesRouter },
   { path: "/businesses/:businessId/members", router: membersRouter },
   { path: "/businesses/:businessId/invitations", router: businessInvitationsRouter },
@@ -36,6 +44,10 @@ const moduleRoutes = [
   { path: "/businesses/:businessId/journals", router: journalsRouter },
   { path: "/businesses/:businessId/reports", router: reportsRouter },
   { path: "/businesses/:businessId/reconciliations", router: reconciliationsRouter },
+  { path: "/businesses/:businessId/analytics", router: analyticsRouter },
+  { path: "/businesses/:businessId/budgets", router: budgetsRouter },
+  { path: "/businesses/:businessId/goals", router: goalsRouter },
+  { path: "/businesses/:businessId/report-exports", router: reportExportsRouter },
 ];
 
 const router = Router();

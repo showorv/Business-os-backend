@@ -180,6 +180,15 @@ describe("Row-Level Security on finance tables", () => {
     "journal_lines",
     "reconciliations",
     "reconciliation_lines",
+    "ledger_monthly_rollups",
+    "budgets",
+    "budget_lines",
+    "budget_alerts",
+    "goals",
+    "report_exports",
+    "outbox_events",
+    "exchange_rates",
+    "intercompany_transfers",
   ];
 
   it("every business table has RLS switched on and a policy", async () => {

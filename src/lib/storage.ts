@@ -72,4 +72,8 @@ export const openObjectStream = async (key: string) => {
   }
 };
 
+// For files the server makes itself, such as report exports.
+export const putObject = (key: string, body: Uint8Array, contentType: string) =>
+  client.send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: body, ContentType: contentType }));
+
 export const deleteObject = (key: string) => client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));

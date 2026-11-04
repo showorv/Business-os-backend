@@ -50,6 +50,30 @@ const listMyMemberships = (userId: string) =>
     select: { businessId: true, role: { select: { key: true } } },
   });
 
+// The server-side answer to "which businesses may this user see in a consolidated view?".
+// The client never sends this list.
+const listBusinessesWithPermission = async (userId: string, permission: string, includeArchived: boolean) => {
+  const memberships = await prisma.businessMember.findMany({
+    where: {
+      userId,
+      status: "ACTIVE",
+      ...(includeArchived ? {} : { business: { status: { not: "ARCHIVED" } } }),
+    },
+    select: {
+      extraPermissions: true,
+      role: { select: { permissions: { select: { permissionKey: true } } } },
+      business: { select: { id: true, name: true, baseCurrency: true, status: true } },
+    },
+  });
+  return memberships
+    .filter(
+      (member) =>
+        member.extraPermissions.includes(permission) ||
+        member.role.permissions.some((item) => item.permissionKey === permission),
+    )
+    .map((member) => member.business);
+};
+
 // Used on the transaction that creates the business, before any RLS scope can include it.
 const addOwner = async (
   tx: Prisma.TransactionClient,
@@ -222,6 +246,7 @@ const remove = async (business: BusinessContext, memberId: string, context: Requ
 export const membersService = {
   resolveContext,
   listMyMemberships,
+  listBusinessesWithPermission,
   addOwner,
   addFromInvitation,
   isActiveMemberByEmail,

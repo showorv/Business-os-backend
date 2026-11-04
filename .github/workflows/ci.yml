@@ -36,8 +36,12 @@ jobs:
       - run: |
           docker run -d --name minio -p 9000:9000 -e MINIO_ROOT_USER=business_os -e MINIO_ROOT_PASSWORD=business_os_dev cgr.dev/chainguard/minio:latest server /data
           until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done
+      # PDF exports need Chrome and the system libraries it uses.
+      - run: sudo npx puppeteer browsers install chrome --install-deps
       - run: npx prisma generate
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+        env:
+          CHROME_NO_SANDBOX: "true"
       - run: npm run build

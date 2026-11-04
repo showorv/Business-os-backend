@@ -193,7 +193,23 @@ const verifyBusiness = async (businessId: string): Promise<LedgerCheck> => {
       FROM journal_lines l WHERE l.ledger_account_id = f.ledger_account_id
     ) ledger ON true
     WHERE f.business_id = ${businessId}::uuid AND f.current_balance_minor <> ledger.balance`;
-  return { businessId, unbalancedEntries: Number(unbalanced!.count), accountsOutOfStep: Number(outOfStep!.count) };
+  const [rollups] = await prisma.$queryRaw<{ count: bigint }[]>`
+    SELECT COUNT(*) AS count FROM (
+      SELECT l.ledger_account_id, date_trunc('month', e.entry_date)::date AS month,
+        SUM(l.debit_minor) AS debit, SUM(l.credit_minor) AS credit
+      FROM journal_lines l JOIN journal_entries e ON e.id = l.journal_entry_id
+      WHERE e.business_id = ${businessId}::uuid AND e.kind <> 'CLOSING'
+      GROUP BY 1, 2
+    ) ledger
+    FULL JOIN (SELECT * FROM ledger_monthly_rollups WHERE business_id = ${businessId}::uuid) r
+      ON r.ledger_account_id = ledger.ledger_account_id AND r.month = ledger.month
+    WHERE COALESCE(ledger.debit, 0) <> COALESCE(r.debit_minor, 0) OR COALESCE(ledger.credit, 0) <> COALESCE(r.credit_minor, 0)`;
+  return {
+    businessId,
+    unbalancedEntries: Number(unbalanced!.count),
+    accountsOutOfStep: Number(outOfStep!.count),
+    rollupsOutOfStep: Number(rollups!.count),
+  };
 };
 
 export const reportsService = { trialBalance, profitAndLoss, balanceSheet, cashFlow, verifyBusiness };
