@@ -124,6 +124,7 @@ model Transaction {
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   business      Business                @relation(fields: [businessId], references: [id])
+  recurringRuns RecurringRun[]
   account       FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
   toAccount     FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
   category      Category?               @relation(fields: [categoryId], references: [id])

@@ -4,6 +4,7 @@ import { env } from "./app/config/env.config.js";
 import { shutdownTelemetry } from "./instrument.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
+import { closeRealtime } from "./lib/realtime.js";
 import { redis } from "./lib/redis.js";
 import { ensureBucket } from "./lib/storage.js";
 
@@ -24,7 +25,11 @@ const shutdown = async (signal: string) => {
   logger.info({ signal }, "shutting down");
 
   // Stop taking requests, let running ones finish, then close dependencies.
-  await new Promise((resolve) => server.close(resolve));
+  const closed = new Promise((resolve) => server.close(resolve));
+  // Live notification streams never finish by themselves. Browsers reconnect to the next process.
+  closeRealtime();
+  server.closeAllConnections();
+  await closed;
   await prisma.$disconnect();
   redis.disconnect();
   await Sentry.close(2000);

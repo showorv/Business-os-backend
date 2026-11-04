@@ -1,5 +1,5 @@
 // Run with `npm run ledger:verify`. Exits 1 if any entry is unbalanced, or if an account's cached
-// balance or a monthly rollup differs from the ledger. Phase 6 moves this to a nightly job with an alert.
+// balance or a monthly rollup differs from the ledger. The worker also runs this check every night.
 import { reportsService } from "../app/modules/reports/reports.service.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";

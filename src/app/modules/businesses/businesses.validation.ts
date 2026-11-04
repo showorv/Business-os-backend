@@ -1,17 +1,7 @@
 import { z } from "zod";
 import { normalizeDigits } from "../../utils/normalize.js";
-import { currencyField, textField } from "../../utils/validationFields.js";
+import { currencyField, textField, timezoneField } from "../../utils/validationFields.js";
 
-const isTimezone = (value: string) => {
-  try {
-    new Intl.DateTimeFormat("en", { timeZone: value });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const timezoneField = z.string().refine(isTimezone, { message: "UNSUPPORTED_TIMEZONE" });
 const fiscalMonthField = z.coerce.number().int().min(1).max(12);
 
 // Bump BUSINESS_SETTINGS_VERSION when a change here needs existing rows to be migrated.

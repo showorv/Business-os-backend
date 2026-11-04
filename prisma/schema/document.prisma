@@ -34,6 +34,7 @@ model Document {
 
   business    Business                @relation(fields: [businessId], references: [id])
   attachments TransactionAttachment[]
+  taskAttachments TaskAttachment[]
 
   @@index([businessId, id(sort: Desc)])
   @@map("documents")

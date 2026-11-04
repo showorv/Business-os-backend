@@ -4,6 +4,10 @@ import { env } from "../app/config/env.config.js";
 export const QueueName = {
   LEDGER_EVENTS: "ledger-events",
   REPORT_EXPORTS: "report-exports",
+  DOMAIN_EVENTS: "domain-events",
+  REMINDERS: "reminders",
+  NOTIFICATIONS: "notifications",
+  MAINTENANCE: "maintenance",
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -35,5 +39,13 @@ export const queues = {
     connection: queueConnection,
     // A PDF needs a browser, so failed exports retry fewer times.
     defaultJobOptions: { ...defaultJobOptions, attempts: 3 },
+  }),
+  [QueueName.DOMAIN_EVENTS]: new Queue(QueueName.DOMAIN_EVENTS, { connection: queueConnection, defaultJobOptions }),
+  [QueueName.REMINDERS]: new Queue(QueueName.REMINDERS, { connection: queueConnection, defaultJobOptions }),
+  [QueueName.NOTIFICATIONS]: new Queue(QueueName.NOTIFICATIONS, { connection: queueConnection, defaultJobOptions }),
+  // These run again on their next schedule, so a failure is not worth retrying at once.
+  [QueueName.MAINTENANCE]: new Queue(QueueName.MAINTENANCE, {
+    connection: queueConnection,
+    defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
   }),
 };

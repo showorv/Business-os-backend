@@ -1,0 +1,191 @@
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  BLOCKED
+  DONE
+  CANCELLED
+}
+
+enum ReminderStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+enum ReminderSource {
+  MANUAL
+  TASK
+  RECURRING_SCHEDULE
+}
+
+enum ScheduleKind {
+  TRANSACTION
+  SALARY
+}
+
+enum ScheduleStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+enum ScheduleRunStatus {
+  CREATED
+  FAILED
+}
+
+model Task {
+  id          String       @id @default(uuid(7)) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  businessId  String       @map("business_id") @db.Uuid
+  title       String
+  description String?
+  assigneeId  String?      @map("assignee_id") @db.Uuid
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(TODO)
+  dueAt       DateTime?    @map("due_at") @db.Timestamptz(3)
+  completedAt DateTime?    @map("completed_at") @db.Timestamptz(3)
+  createdBy   String       @map("created_by") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business    Business         @relation(fields: [businessId], references: [id])
+  assignee    User?            @relation("TaskAssignee", fields: [assigneeId], references: [id])
+  comments    TaskComment[]
+  attachments TaskAttachment[]
+
+  @@index([businessId, id(sort: Desc)])
+  @@index([assigneeId, status])
+  @@index([status, dueAt])
+  @@map("tasks")
+}
+
+// Comments are never edited, so what was said stays on the record.
+model TaskComment {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  businessId  String   @map("business_id") @db.Uuid
+  taskId      String   @map("task_id") @db.Uuid
+  authorId    String   @map("author_id") @db.Uuid
+  body        String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task   Task @relation(fields: [taskId], references: [id])
+  author User @relation("TaskCommentAuthor", fields: [authorId], references: [id])
+
+  @@index([taskId, id])
+  @@index([businessId])
+  @@map("task_comments")
+}
+
+model TaskAttachment {
+  taskId      String   @map("task_id") @db.Uuid
+  documentId  String   @map("document_id") @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  businessId  String   @map("business_id") @db.Uuid
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  task     Task     @relation(fields: [taskId], references: [id])
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@id([taskId, documentId])
+  @@index([businessId])
+  @@map("task_attachments")
+}
+
+// The source of truth for reminders. BullMQ only ever holds the next firing of each one, so emptying
+// Redis loses nothing: the reconciler rebuilds those jobs from this table.
+model Reminder {
+  id               String         @id @default(uuid(7)) @db.Uuid
+  workspaceId      String         @map("workspace_id") @db.Uuid
+  businessId       String         @map("business_id") @db.Uuid
+  title            String
+  // An RFC 5545 rule such as FREQ=MONTHLY;BYMONTHDAY=1. Empty means it fires once.
+  rrule            String?
+  startsAt         DateTime       @map("starts_at") @db.Timestamptz(3)
+  timezone         String
+  // How long before each occurrence to fire.
+  leadMinutes      Int            @default(0) @map("lead_minutes")
+  nextOccurrenceAt DateTime?      @map("next_occurrence_at") @db.Timestamptz(3)
+  nextFireAt       DateTime?      @map("next_fire_at") @db.Timestamptz(3)
+  lastFiredAt      DateTime?      @map("last_fired_at") @db.Timestamptz(3)
+  channels         String[]
+  recipientUserId  String         @map("recipient_user_id") @db.Uuid
+  sourceType       ReminderSource @default(MANUAL) @map("source_type")
+  sourceId         String?        @map("source_id") @db.Uuid
+  status           ReminderStatus @default(ACTIVE)
+  createdBy        String         @map("created_by") @db.Uuid
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business  Business @relation(fields: [businessId], references: [id])
+  recipient User     @relation("ReminderRecipient", fields: [recipientUserId], references: [id])
+
+  @@index([businessId, id(sort: Desc)])
+  @@index([status, nextFireAt])
+  @@index([sourceType, sourceId])
+  @@map("reminders")
+}
+
+// A transaction that repeats. Each occurrence goes through the normal transaction rules.
+model RecurringSchedule {
+  id               String            @id @default(uuid(7)) @db.Uuid
+  workspaceId      String            @map("workspace_id") @db.Uuid
+  businessId       String            @map("business_id") @db.Uuid
+  name             String
+  kind             ScheduleKind      @default(TRANSACTION)
+  rrule            String
+  startDate        DateTime          @map("start_date") @db.Date
+  timezone         String
+  nextRunAt        DateTime?         @map("next_run_at") @db.Timestamptz(3)
+  type             TransactionType
+  accountId        String            @map("account_id") @db.Uuid
+  toAccountId      String?           @map("to_account_id") @db.Uuid
+  categoryId       String?           @map("category_id") @db.Uuid
+  amountMinor      BigInt            @map("amount_minor")
+  feeMinor         BigInt            @default(0) @map("fee_minor")
+  description      String?
+  // True posts each one to the ledger. False leaves a draft for someone to check.
+  autoPost         Boolean           @default(false) @map("auto_post")
+  remindDaysBefore Int?              @map("remind_days_before")
+  status           ScheduleStatus    @default(ACTIVE)
+  createdBy        String            @map("created_by") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business Business       @relation(fields: [businessId], references: [id])
+  runs     RecurringRun[]
+
+  @@index([businessId, id(sort: Desc)])
+  @@index([status, nextRunAt])
+  @@map("recurring_schedules")
+}
+
+// One row per occurrence, so an occurrence can never create two transactions.
+model RecurringRun {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  workspaceId    String            @map("workspace_id") @db.Uuid
+  businessId     String            @map("business_id") @db.Uuid
+  scheduleId     String            @map("schedule_id") @db.Uuid
+  occurrenceDate DateTime          @map("occurrence_date") @db.Date
+  status         ScheduleRunStatus
+  transactionId  String?           @map("transaction_id") @db.Uuid
+  errorCode      String?           @map("error_code")
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  schedule    RecurringSchedule @relation(fields: [scheduleId], references: [id])
+  transaction Transaction?      @relation(fields: [transactionId], references: [id])
+
+  @@unique([scheduleId, occurrenceDate])
+  @@index([businessId])
+  @@map("recurring_runs")
+}

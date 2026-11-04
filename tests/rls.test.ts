@@ -273,3 +273,48 @@ describe("GET /businesses/:id/audit", () => {
     expect(filtered.body.data).toHaveLength(1);
   });
 });
+
+describe("tasks, reminders and schedules stay inside their business", () => {
+  it("the database hides another business's rows, even with no filter", async () => {
+    const { alice, bob, aliceBiz, bobBiz } = await twoBusinesses();
+    const auth = bearer(alice);
+    const base = `${API}/businesses/${aliceBiz.id}`;
+    const task = await api().post(`${base}/tasks`).set("Authorization", auth).send({ title: "secret", dueAt: new Date(Date.now() + 86_400_000 * 3).toISOString() });
+    await api().post(`${base}/tasks/${task.body.data.id}/comments`).set("Authorization", auth).send({ body: "secret" });
+
+    const seen = await withRls({ userId: bob.userId, workspaceId: bobBiz.workspaceId, businessIds: [bobBiz.id] }, async (tx) => ({
+      tasks: await tx.task.findMany(),
+      comments: await tx.taskComment.findMany(),
+      reminders: await tx.reminder.findMany(),
+      schedules: await tx.recurringSchedule.findMany(),
+      runs: await tx.recurringRun.findMany(),
+    }));
+    expect(seen).toEqual({ tasks: [], comments: [], reminders: [], schedules: [], runs: [] });
+  });
+
+  it("a row can't be written into another business", async () => {
+    const { bob, aliceBiz, bobBiz } = await twoBusinesses();
+    await expect(
+      withRls({ userId: bob.userId, workspaceId: bobBiz.workspaceId, businessIds: [bobBiz.id] }, (tx) =>
+        tx.task.create({ data: { workspaceId: aliceBiz.workspaceId, businessId: aliceBiz.id, title: "x", createdBy: bob.userId } }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("a task id from another business is a 404", async () => {
+    const { alice, bob, aliceBiz, bobBiz } = await twoBusinesses();
+    const task = await api().post(`${API}/businesses/${aliceBiz.id}/tasks`).set("Authorization", bearer(alice)).send({ title: "secret" });
+    const res = await api().get(`${API}/businesses/${bobBiz.id}/tasks/${task.body.data.id}`).set("Authorization", bearer(bob));
+    expect(res.status).toBe(404);
+  });
+
+  it("comments can't be edited or deleted, even by mistake", async () => {
+    const { alice, aliceBiz } = await twoBusinesses();
+    const base = `${API}/businesses/${aliceBiz.id}/tasks`;
+    const task = await api().post(base).set("Authorization", bearer(alice)).send({ title: "x" });
+    await api().post(`${base}/${task.body.data.id}/comments`).set("Authorization", bearer(alice)).send({ body: "said" });
+    await expect(
+      withRls({ userId: alice.userId, workspaceId: aliceBiz.workspaceId, businessIds: [aliceBiz.id] }, (tx) => tx.taskComment.updateMany({ data: { body: "changed" } })),
+    ).rejects.toThrow();
+  });
+});

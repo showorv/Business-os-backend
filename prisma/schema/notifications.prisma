@@ -1,0 +1,107 @@
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum DeliveryStatus {
+  PENDING
+  QUEUED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+// Stores a type and its values, never a sentence. The app and the worker turn them into words in the
+// reader's language. Someone without an account yet (an invitation) has an email instead of a user.
+model Notification {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  workspaceId String?   @map("workspace_id") @db.Uuid
+  businessId  String?   @map("business_id") @db.Uuid
+  userId      String?   @map("user_id") @db.Uuid
+  email       String?   @db.Citext
+  locale      String?   @db.VarChar(10)
+  type        String
+  params      Json
+  entityType  String?   @map("entity_type")
+  entityId    String?   @map("entity_id") @db.Uuid
+  // Unique, so a job that runs twice cannot notify twice.
+  dedupeKey   String    @unique @map("dedupe_key")
+  readAt      DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([userId, id(sort: Desc)])
+  @@map("notifications")
+}
+
+// One row per channel, recording what happened to each send.
+model NotificationDelivery {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  notificationId String              @map("notification_id") @db.Uuid
+  userId         String?             @map("user_id") @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDING)
+  // Later than now during the reader's quiet hours.
+  sendAfter      DateTime            @default(now()) @map("send_after") @db.Timestamptz(3)
+  attempts       Int                 @default(0)
+  lastErrorCode  String?             @map("last_error_code")
+  queuedAt       DateTime?           @map("queued_at") @db.Timestamptz(3)
+  sentAt         DateTime?           @map("sent_at") @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationId, channel])
+  @@index([status, sendAfter])
+  @@map("notification_deliveries")
+}
+
+model NotificationPreference {
+  userId          String   @id @map("user_id") @db.Uuid
+  emailEnabled    Boolean  @default(true) @map("email_enabled")
+  pushEnabled     Boolean  @default(true) @map("push_enabled")
+  // Local times such as 22:00 and 08:00. Email and push wait until the end; in-app never waits.
+  quietHoursStart String?  @map("quiet_hours_start") @db.VarChar(5)
+  quietHoursEnd   String?  @map("quiet_hours_end") @db.VarChar(5)
+  timezone        String   @default("Asia/Dhaka")
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notification_preferences")
+}
+
+// One row per browser that allowed push.
+model PushSubscription {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
+}
+
+// Only the hash is stored, so a database leak cannot be used to reset a password.
+model PasswordResetToken {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(3)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}

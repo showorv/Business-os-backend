@@ -15,6 +15,10 @@ import { businessInvitationsRouter, invitationsRouter } from "../modules/invitat
 import { journalsRouter } from "../modules/journals/journals.router.js";
 import { ledgerAccountsRouter } from "../modules/ledger-accounts/ledger-accounts.router.js";
 import { membersRouter } from "../modules/members/members.router.js";
+import { notificationsRouter } from "../modules/notifications/notifications.router.js";
+import { recurringSchedulesRouter } from "../modules/recurring-schedules/recurring-schedules.router.js";
+import { remindersRouter } from "../modules/reminders/reminders.router.js";
+import { allTasksRouter, tasksRouter } from "../modules/tasks/tasks.router.js";
 import { reconciliationsRouter } from "../modules/reconciliations/reconciliations.router.js";
 import { reportExportsRouter } from "../modules/report-exports/report-exports.router.js";
 import { reportsRouter } from "../modules/reports/reports.router.js";
@@ -31,6 +35,8 @@ const moduleRoutes = [
   { path: "/invitations", router: invitationsRouter },
   { path: "/exchange-rates", router: exchangeRatesRouter },
   { path: "/consolidated", router: consolidatedRouter },
+  { path: "/notifications", router: notificationsRouter },
+  { path: "/tasks", router: allTasksRouter },
   { path: "/businesses", router: businessesRouter },
   { path: "/businesses/:businessId/members", router: membersRouter },
   { path: "/businesses/:businessId/invitations", router: businessInvitationsRouter },
@@ -48,6 +54,9 @@ const moduleRoutes = [
   { path: "/businesses/:businessId/budgets", router: budgetsRouter },
   { path: "/businesses/:businessId/goals", router: goalsRouter },
   { path: "/businesses/:businessId/report-exports", router: reportExportsRouter },
+  { path: "/businesses/:businessId/tasks", router: tasksRouter },
+  { path: "/businesses/:businessId/reminders", router: remindersRouter },
+  { path: "/businesses/:businessId/recurring-schedules", router: recurringSchedulesRouter },
 ];
 
 const router = Router();

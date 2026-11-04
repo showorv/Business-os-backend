@@ -2,7 +2,16 @@ import { budgetsService } from "../modules/budgets/budgets.service.js";
 import { goalsService } from "../modules/goals/goals.service.js";
 import { reportExportsService } from "../modules/report-exports/report-exports.service.js";
 import { EventType } from "../utils/outbox.js";
+import {
+  emailInvitation,
+  tellAboutBudget,
+  tellAboutGoal,
+  tellApprovers,
+  tellTaskAssignee,
+  tellTaskPeople,
+} from "./domainEvents.js";
 import type { EventJob } from "./eventTypes.js";
+import { scheduleReminder } from "./reminderJobs.js";
 
 // What each event does. Handlers can safely run twice, because delivery is at-least-once.
 export const processEvent = async (event: EventJob) => {
@@ -15,6 +24,27 @@ export const processEvent = async (event: EventJob) => {
       return;
     case EventType.REPORT_EXPORT_REQUESTED:
       await reportExportsService.run(event.payload.exportId!);
+      return;
+    case EventType.BUDGET_THRESHOLD_REACHED:
+      await tellAboutBudget(event);
+      return;
+    case EventType.GOAL_ACHIEVED:
+      await tellAboutGoal(event);
+      return;
+    case EventType.TRANSACTION_SUBMITTED:
+      await tellApprovers(event);
+      return;
+    case EventType.TASK_ASSIGNED:
+      await tellTaskAssignee(event);
+      return;
+    case EventType.TASK_COMMENTED:
+      await tellTaskPeople(event);
+      return;
+    case EventType.REMINDER_CHANGED:
+      await scheduleReminder(event.payload.reminderId!);
+      return;
+    case EventType.INVITATION_CREATED:
+      await emailInvitation(event);
       return;
   }
 };

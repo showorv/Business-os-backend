@@ -56,4 +56,17 @@ router.post(
   authController.changePassword,
 );
 
+router.post(
+  "/password/forgot",
+  rateLimit({ name: "password-forgot", windowSeconds: 600, max: 5 }),
+  validate({ body: authValidation.forgotPassword }),
+  authController.forgotPassword,
+);
+router.post(
+  "/password/reset",
+  rateLimit({ name: "password-reset", windowSeconds: 600, max: 10 }),
+  validate({ body: authValidation.resetPassword }),
+  authController.resetPassword,
+);
+
 export const authRouter = router;

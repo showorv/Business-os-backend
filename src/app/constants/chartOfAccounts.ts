@@ -13,6 +13,7 @@ export interface ChartTemplate {
 
 // Accounts the code itself posts to.
 export const LedgerCode = {
+  SALARIES: "6000",
   CASH: "1100",
   ACCOUNTS_RECEIVABLE: "1200",
   DUE_FROM_BUSINESSES: "1300",

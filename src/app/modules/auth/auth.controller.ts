@@ -4,12 +4,14 @@ import { getRequestContext } from "../../utils/requestContext.js";
 import { sendResponse } from "../../utils/sendResponse.js";
 import type {
   IChangePasswordBody,
+  IForgotPasswordBody,
   ILoginBody,
   IMfaCodeBody,
   IMfaDisableBody,
   IMfaSetupBody,
   IMfaVerifyBody,
   IRegisterBody,
+  IResetPasswordBody,
   ISessionParams,
   IssuedTokens,
 } from "./auth.interface.js";
@@ -100,7 +102,19 @@ const changePassword: RequestHandler = async (req, res) => {
   sendResponse(res, 200, { passwordChanged: true });
 };
 
+const forgotPassword: RequestHandler = async (req, res) => {
+  await authService.forgotPassword((req.validated.body as IForgotPasswordBody).email, getRequestContext(req));
+  sendResponse(res, 202, { accepted: true });
+};
+
+const resetPassword: RequestHandler = async (req, res) => {
+  await authService.resetPassword(req.validated.body as IResetPasswordBody, getRequestContext(req));
+  sendResponse(res, 200, { passwordChanged: true });
+};
+
 export const authController = {
+  forgotPassword,
+  resetPassword,
   register,
   login,
   verifyMfa,

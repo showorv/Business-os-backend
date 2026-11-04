@@ -80,7 +80,7 @@ model BudgetLine {
     @@map("budget_lines")
 }
 
-// Each threshold fires once per line. Phase 6 delivers these as notifications.
+// Each threshold fires once per line. The worker tells people through notifications.
 model BudgetAlert {
     id           String   @id @default(uuid(7)) @db.Uuid
     workspaceId  String   @map("workspace_id") @db.Uuid

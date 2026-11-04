@@ -5,6 +5,7 @@ import { Permission } from "../../constants/permissions.js";
 import { addDays, fromDbDate, todayInTimezone, toDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import { type IdempotencyRequest, withIdempotency } from "../../utils/idempotency.js";
+import { EventType, publishEvent } from "../../utils/outbox.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
 import { buildTransactionLines } from "../../utils/postingRules.js";
 import type { RequestContext } from "../../utils/requestContext.js";
@@ -208,8 +209,8 @@ const submit = async (
   const { approvalThresholdMinor } = await businessesService.getTransactionSettings(tx, business.businessId);
   if (!needsApproval(transaction, approvalThresholdMinor)) return postToLedger(tx, business, transaction, context);
 
-  // Notifying the approver is added in Phase 6.
   const pending = await tx.transaction.update({ where: { id: transaction.id }, data: { status: "PENDING_APPROVAL" } });
+  await publishEvent(tx, business, EventType.TRANSACTION_SUBMITTED, { transactionId: transaction.id });
   await auditService.recordForBusiness(tx, business, {
     action: "transaction.submitted",
     context,
@@ -218,6 +219,14 @@ const submit = async (
     after: { amountMinor: transaction.amountMinor, thresholdMinor: approvalThresholdMinor },
   });
   return pending;
+};
+
+// The checks every transaction passes. Recurring schedules run them when they are set up, so a bad
+// schedule is refused straight away rather than failing weeks later.
+const assertDraftValid = async (tx: Prisma.TransactionClient, businessId: string, draft: ITransactionDraft) => {
+  assertTransferFields(draft);
+  await resolveCurrency(tx, businessId, draft);
+  await assertCategoryFits(tx, businessId, draft);
 };
 
 // ---------------------------------------------------------------------------
@@ -230,6 +239,7 @@ const create = (
   body: ICreateTransactionBody,
   idempotency: IdempotencyRequest | null,
   context: RequestContext,
+  source: "MANUAL" | "RECURRING" = "MANUAL",
 ) =>
   withBusinessScope(business, (tx) =>
     withIdempotency(tx, business.userId, idempotency, 201, async () => {
@@ -263,6 +273,7 @@ const create = (
           description: body.description ?? null,
           possibleDuplicate: duplicate !== null,
           duplicateOfId: duplicate?.id ?? null,
+          source,
           createdBy: business.userId,
         },
       });
@@ -272,7 +283,7 @@ const create = (
         context,
         entityType: "transaction",
         entityId: transaction.id,
-        after: { number: transaction.number, type: draft.type, amountMinor: draft.amountMinor, currency },
+        after: { number: transaction.number, type: draft.type, amountMinor: draft.amountMinor, currency, source },
       });
       return toDto(body.postNow ? await submit(tx, business, transaction, context) : transaction);
     }),
@@ -549,6 +560,7 @@ const detachDocument = (
   });
 
 export const transactionsService = {
+  assertDraftValid,
   create,
   list,
   getOne,

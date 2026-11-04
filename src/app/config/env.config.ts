@@ -46,12 +46,27 @@ const envSchema = z
     // runs no scripts and loads nothing from outside.
     CHROME_NO_SANDBOX: z.stringbool().default(false),
 
+    // The web app's address, for links in emails.
+    APP_URL: z.url().default("http://localhost:5173"),
+    // Leave empty to switch email off: deliveries are then recorded as SKIPPED.
+    SMTP_URL: optionalUrl,
+    EMAIL_FROM: z.string().default("Business OS <no-reply@localhost>"),
+    // Generate the pair with: npx web-push generate-vapid-keys. Leave empty to switch push off.
+    VAPID_PUBLIC_KEY: optionalString,
+    VAPID_PRIVATE_KEY: optionalString,
+    VAPID_SUBJECT: z.string().default("mailto:admin@example.com"),
+    // Leave empty to switch off the queue screen at /admin/queues. Sign in as "admin".
+    BULL_BOARD_PASSWORD: z.preprocess(emptyToUndefined, z.string().min(12).optional()),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })
   .superRefine((value, ctx) => {
     if (value.JWT_ACCESS_SECRET === value.JWT_MFA_SECRET) {
       ctx.addIssue({ code: "custom", path: ["JWT_MFA_SECRET"], message: "must differ from JWT_ACCESS_SECRET" });
+    }
+    if (Boolean(value.VAPID_PUBLIC_KEY) !== Boolean(value.VAPID_PRIVATE_KEY)) {
+      ctx.addIssue({ code: "custom", path: ["VAPID_PRIVATE_KEY"], message: "set both VAPID keys, or neither" });
     }
     if (value.NODE_ENV === "production" && value.BCRYPT_COST < 12) {
       ctx.addIssue({ code: "custom", path: ["BCRYPT_COST"], message: "must be at least 12 in production" });

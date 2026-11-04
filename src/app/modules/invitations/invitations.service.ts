@@ -1,8 +1,9 @@
 import { prisma } from "../../../lib/prisma.js";
 import { withBusinessScope } from "../../../lib/rls.js";
 import { invalidateBusinessContext } from "../../utils/businessContextCache.js";
-import { randomToken, sha256Hex } from "../../utils/crypto.js";
+import { encryptSecret, randomToken, sha256Hex } from "../../utils/crypto.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
+import { EventType, publishEvent } from "../../utils/outbox.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
@@ -14,8 +15,8 @@ import type { ICreateInvitationBody } from "./invitations.interface.js";
 
 const EXPIRY_DAYS = 7;
 
-// Only the hash is stored, so the token is returned here once. The inviter shares it by hand until
-// Phase 6 adds email delivery.
+// Only the hash is stored, so the token is returned here once, in case the inviter wants to share it
+// by hand. The email carries it encrypted through the outbox, so it is never readable in the database.
 const create = async (business: BusinessContext, body: ICreateInvitationBody, context: RequestContext) => {
   const token = randomToken();
 
@@ -49,6 +50,10 @@ const create = async (business: BusinessContext, body: ICreateInvitationBody, co
       entityType: "invitation",
       entityId: created.id,
       after: { email: body.email, roleKey: body.roleKey },
+    });
+    await publishEvent(tx, business, EventType.INVITATION_CREATED, {
+      invitationId: created.id,
+      tokenEncrypted: encryptSecret(token, created.id),
     });
     return created;
   });

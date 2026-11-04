@@ -56,6 +56,12 @@ if (!isProduction) {
   app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(document));
 }
 
+// Registered before helmet because this admin screen needs inline scripts. Off unless a password is set.
+if (env.BULL_BOARD_PASSWORD) {
+  const { queueBoard } = await import("./app/admin/queueBoard.js");
+  app.use("/admin/queues", rateLimit({ name: "queue-board", windowSeconds: 60, max: 120 }), queueBoard());
+}
+
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGINS, credentials: true, exposedHeaders: ["X-Request-Id"] }));
 app.use(rateLimit({ name: "global", windowSeconds: 60, max: 300 }));

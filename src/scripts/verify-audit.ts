@@ -1,5 +1,5 @@
 // Run with `npm run audit:verify`. Exits 1 when a chain is broken.
-// Phase 6 moves this to a nightly BullMQ job with an alert.
+// The worker also runs this check every night.
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { redis } from "../lib/redis.js";

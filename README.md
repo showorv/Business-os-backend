@@ -10,9 +10,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | 2 | Multi-business (businesses, members, RBAC, RLS) | ✅ Done |
 | 3 | Accounts & transactions | ✅ Done |
 | 4 | Double-entry ledger | ✅ Done |
-| **5** | **Analytics & reports** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 6 | Tasks & reminders (email, notifications) | ⬜ Next |
-| 7 | Integrations (bKash, banks, CSV) | ⬜ |
+| 5 | Analytics & reports | ✅ Done |
+| **6** | **Tasks & reminders (email, notifications)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 7 | Integrations (bKash, banks, CSV) | ⬜ Next |
 | 8 | AI & RAG | ⬜ |
 | 9 | Frontend | ⬜ |
 | 10 | Hardening & launch | ⬜ |
@@ -27,7 +27,7 @@ You need Docker Desktop running and Node. This was built and tested on Node 26.
 npm install
 ```
 
-**Step 2. Start Postgres, Redis and MinIO**
+**Step 2. Start Postgres, Redis, MinIO and Mailpit**
 
 ```bash
 docker compose up -d --wait
@@ -65,12 +65,13 @@ npm run dev
 npm run worker
 ```
 
-The worker makes report exports and checks budgets and goals. The API runs without it, but those jobs wait until it starts.
+The worker makes report exports, checks budgets and goals, fires reminders, sends email and push, runs recurring transactions and does the nightly checks. The API runs without it, but all of that waits until it starts.
 
 **Step 8. Check it**
 
 - http://localhost:5001/health/ready should show `database`, `redis` and `storage` as `true`
 - http://localhost:5001/api/docs is Swagger UI, where you can try every endpoint (not served in production)
+- http://localhost:8025 is Mailpit, which catches every email sent in development. Add `SMTP_URL=smtp://localhost:1025` to `.env` to use it
 
 ### Which database does `.env` use?
 
@@ -94,7 +95,7 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run db:status` | Shows which migrations are applied |
 | `npm run db:provision` | Gives older businesses any starting data added since they were created. Safe to repeat |
 | `npm run audit:verify` | Checks the audit hash chain; exits with 1 if it finds tampering |
-| `npm run ledger:verify` | Checks every journal balances and every cached balance matches the ledger; exits with 1 if not |
+| `npm run ledger:verify` | Checks every journal balances and every cached balance matches the ledger; exits with 1 if not. The worker also runs this nightly |
 | `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
 | `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
 
@@ -106,14 +107,16 @@ src/
 ├── worker.ts              Starts the background worker: same code, run as a second process
 ├── app.ts                 Express app: the middleware order lives here
 ├── instrument.ts          OpenTelemetry + Sentry, loaded before everything else
-├── lib/                   prisma, redis, logger, storage (S3), queues (BullMQ), rls (the business transaction helper)
+├── lib/                   prisma, redis, logger, storage (S3), queues (BullMQ), rls (the business transaction helper), mailer, webPush, realtime
 ├── scripts/               verify-audit, verify-ledger, provision-businesses
 ├── types/express.d.ts     Adds req.auth, req.requestId, req.validated
 └── app/
     ├── config/            env.config.ts (validated environment)
     ├── constants/         permissions, categoryTemplates, chartOfAccounts
-    ├── jobs/              outboxRelay, processEvent, eventTypes
+    ├── admin/             queueBoard (the Bull Board screen)
+    ├── jobs/              outboxRelay, deliveryRelay, processEvent, eventTypes, domainEvents, reminderJobs, overdueScan, maintenance
     ├── exports/           reportTable, renderPdf, renderXlsx, renderCsv
+    ├── notifications/     templates (email and push wording, English and Bangla)
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
@@ -140,9 +143,13 @@ src/
         ├── goals/            same five files
         ├── exchange-rates/   same five files
         ├── consolidated/     same five files
-        └── report-exports/   same five files
+        ├── report-exports/   same five files
+        ├── tasks/            same five files
+        ├── reminders/        same five files
+        ├── recurring-schedules/  same five files
+        └── notifications/    same five files
 prisma/
-├── schema/                schema, workspace, auth, business, finance, ledger, analytics, document and audit models
+├── schema/                schema, workspace, auth, business, finance, ledger, analytics, tasks, notifications, document and audit models
 └── migrations/
 postman/                   Collection and the script that generates it
 tests/                     Integration tests against real Postgres and Redis
@@ -204,6 +211,147 @@ requireAuth              who are you?
 
 **New error:** add a code to `src/app/utils/errors.ts`.
 
+## What was built in Phase 6
+
+**The goal:** the system now reaches out to you. Tasks and reminders that can't be lost, recurring transactions and salaries that run themselves, and email, in-app and push notifications in English and Bangla.
+
+### How the pieces connect
+```
+                      Something happens
+   (task assigned, budget reached, reminder due, salary failed...)
+                               │
+                               ▼
+     notifications table + one delivery row per channel   <── saved in a transaction
+          │                    │                  │
+       IN_APP                EMAIL              PUSH
+   shown straight away    worker relay every 2 seconds moves
+   + live stream (SSE)    what's due to BullMQ, then sends it
+```
+
+### Step 1. Tasks
+`POST /businesses/:id/tasks` creates a task with a title, description, assignee, priority and due date. The assignee must be an active member of the business.
+
+```
+TODO ⇄ IN_PROGRESS ──> DONE
+  │        │             │
+  └─ BLOCKED / CANCELLED  └─ can be reopened, which goes back to TODO
+```
+
+- **Views:** `?mine=true`, `?overdue=true` and a date range on the list, `/summary` for counts, `/calendar` for tasks and reminders by day, and `GET /tasks` across every business you can read.
+- **Comments and attachments:** comments can't be edited, and the database refuses it. Attachments reuse Phase 3's documents.
+- **Audited:** creating, changing, assigning and commenting all write to the audit log.
+
+### Step 2. Reminders
+A reminder fires once, or repeats by an RFC 5545 rule such as `FREQ=MONTHLY;BYMONTHDAY=1`. You choose the timezone, the channels, who receives it and how long ahead (`leadMinutes`).
+
+**PostgreSQL is the source of truth, and BullMQ only holds the next firing:**
+1. Saving a reminder writes `next_fire_at` and an outbox event.
+2. The worker makes a delayed job whose id comes from the reminder and that time, so repeating this never makes a second job.
+3. When the job runs it locks the reminder. **If the time no longer matches, the job is out of date and is discarded.** That is why editing or pausing a reminder doesn't need to find the old job.
+4. It sends the notification, works out the next time and queues it, or marks the reminder `COMPLETED`.
+
+**Reminders can't be lost.** Every 5 minutes a reconciler rebuilds any job missing from Redis. The reconciler's own timer also lives in Redis, so the worker checks every minute and puts it back. This was tested for real by emptying Redis with a reminder pending: it fired on time.
+
+**Automatic reminders:** a task with a due date gets one a day ahead, or at the due time if that's sooner. A schedule with `remindDaysBefore` gets one at 09:00 local time. These follow their task or schedule, and can't be edited by hand.
+
+**Good to know:**
+- Rules can repeat hourly at most, so nothing can flood people. An impossible rule such as 30 February is treated as having no more dates.
+- A daily reminder stays at the same local time when clocks change. Bangladesh has no clock changes, but other businesses might.
+- A worker that was down for a week sends one message, not seven. Bills are remembered through schedules, which do catch up.
+
+### Step 3. Overdue scan
+Every 15 minutes the worker looks for open tasks past their due date and tells the assignee, or the creator if nobody is assigned. Each task notifies **once per day** in the business's timezone.
+
+### Step 4. Notifications
+Each notification stores a **type and values, never a sentence**, for example `budget.threshold` with `{ percent: 80 }`. The frontend words it in the reader's language. Only email and push are worded by the backend, in `src/app/notifications/templates.ts`, which holds English and Bangla for each type.
+
+| What happens | Who hears | Channels |
+|---|---|---|
+| Task assigned | The new assignee, unless they assigned themselves | In-app, email, push |
+| Comment on a task | Assignee and creator, not the comment's author | In-app, email, push |
+| Task overdue | Assignee, or creator | In-app, email, push |
+| Reminder due | Its recipient | Those chosen on the reminder |
+| Transaction waiting for approval | Everyone who can approve, except the submitter | In-app, email, push |
+| Budget threshold, goal achieved | Everyone with `finance.read` | In-app, email, push |
+| Recurring transaction failed | Whoever set it up | In-app, email, push |
+| Report export ready or failed | Whoever asked | In-app |
+| Ledger or audit check failed | Managers or owners | In-app, email, push, ignoring preferences |
+| Invitation, password reset, password changed, account locked, stolen session | That person | Email only, ignoring preferences |
+
+**Preferences** (`/notifications/preferences`): switch email or push off, and set quiet hours. During quiet hours email and push wait until the end, while in-app still appears. Security emails ignore these settings.
+
+**Every send is recorded:** `GET /notifications/:id/deliveries` shows each channel's status, attempts and last error.
+
+**Sending twice can't happen by accident.** A unique key on each notification and one delivery row per channel match the document's `(reminder_id, fire_at, channel)` rule. A send that fails retries up to 5 times with growing delays. One rare case remains: if the worker dies between the mail server accepting an email and saving `SENT`, that email goes out twice. Email offers no way to fully rule this out.
+
+**Live updates:** `GET /notifications/stream` is Server-Sent Events. The worker publishes through Redis, and the API passes it to the browser. It closes when the access token expires, so a signed-out user can't keep listening, and the browser reconnects with a new token. Each person can hold 5 streams.
+
+**Web push:** set the VAPID keys in `.env`. Only real browser push services are accepted as addresses. Otherwise someone could make the server call its own internal network.
+
+### Step 5. Recurring transactions and salaries
+`POST /businesses/:id/recurring-schedules` repeats a transaction by a rule.
+
+```json
+{ "name": "Office rent", "rrule": "FREQ=MONTHLY;BYMONTHDAY=1", "startDate": "2026-12-01",
+  "accountId": "...", "categoryId": "...", "amountMinor": "3000000",
+  "autoPost": true, "remindDaysBefore": 3 }
+```
+
+**On the 1st, this posts:**
+
+| Account | Dr | Cr |
+|---|---|---|
+| 6100 Rent | ৳30,000 | |
+| 1110 City Bank | | ৳30,000 |
+
+- **`autoPost: false`** (the default) leaves a draft for someone to check.
+- **Every occurrence goes through the normal transaction rules,** including approval limits and closed periods. An amount above the approval limit waits for a person, even with `autoPost`.
+- **Each runs as the person who set it up, with what they may do today.** If their permissions were reduced, it fails. If they left the business, it pauses and tells the owners.
+- **One occurrence can never make two transactions,** because of a unique `(schedule, date)` row and an idempotency key. This was tested with two runs at the same moment.
+- **Missed dates catch up,** each on its own date, because a bill was still owed. Up to 12 per pass. A paused schedule that resumes looks forward instead.
+- **A refusal doesn't stop later dates.** It's recorded as a `FAILED` run and the person is told, and nothing is recorded for that date.
+- **`POST .../run`** runs whatever is due now, without waiting for the 5-minute timer.
+
+**Salaries:** `kind: "SALARY"` is the same thing, always posting to **6000 Salaries Expense**. Make one schedule per employee, or one for the whole payroll. Withholding (2100 Payroll Liabilities) isn't included, because the document places employees and payslips in its future Payroll module.
+
+### Step 6. Password reset and security emails
+- **`POST /auth/password/forgot`** answers the same whether or not the email has an account, so nobody can test which emails exist.
+- **The link lasts one hour and works once.** Only its hash is stored, and asking again cancels the earlier link.
+- **Resetting signs out every session** and emails a notice.
+- **Lockouts, reused session tokens and password changes now send an email**, at most one per hour of each kind.
+- **Invitations are emailed.** The token is still returned to the inviter, in case you want to share it by hand.
+
+Secret links travel through the database and Redis encrypted, and are only decrypted just before sending. A test confirms the readable token isn't in the stored rows.
+
+### Step 7. Timed jobs
+All in the worker, on the `maintenance` queue, in Bangladesh time:
+
+| Job | When | What it does |
+|---|---|---|
+| `reminders.reconcile` | Every 5 min | Rebuilds missing reminder jobs and sends lost from Redis |
+| `recurring.run-due` | Every 5 min | Runs schedules that are due |
+| `tasks.overdue-scan` | Every 15 min | Tells people about overdue tasks |
+| `ledger.verify` | 02:00 | The same check as `npm run ledger:verify` |
+| `audit.verify` | 02:30 | The same check as `npm run audit:verify` |
+| `system.clean-up` | 03:00 | Removes old data, listed below |
+
+**If a nightly check finds a problem,** it goes to the logs and Sentry, and managers or owners get an alert.
+
+**The clean-up removes:** expired idempotency keys, abandoned uploads (after 1 day), published events (30 days), report exports and their files (30 days), notifications (180 days) and expired password links (7 days). An event not yet published is never removed.
+
+### Step 8. Queue screen
+Set `BULL_BOARD_PASSWORD` in `.env` (at least 12 characters), restart the API, and open http://localhost:5001/admin/queues, signing in as `admin`. It shows every queue, including failed jobs, and can retry them. **It's off unless you set a password.** It uses a password rather than a role because queues hold every business's jobs, so use HTTPS in production.
+
+### New settings in `.env`
+All optional. Whatever you leave empty is switched off, and is recorded as `SKIPPED` rather than failing.
+
+| Setting | Purpose |
+|---|---|
+| `APP_URL` | Your web app's address, for links in emails |
+| `SMTP_URL`, `EMAIL_FROM` | Your mail server. `smtp://localhost:1025` is Mailpit in development |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Web push. Generate with `npx web-push generate-vapid-keys` |
+| `BULL_BOARD_PASSWORD` | Switches on the queue screen |
+
 ## What was built in Phase 5
 
 **The goal:** turn the ledger into answers. Dashboards for one business or all of them, budgets and goals with alerts, and files you can hand to an accountant.
@@ -248,7 +396,7 @@ A budget covers a month range, with an amount per category. Actuals come **from 
 | `REACHED` | Exactly at 100% |
 | `OVER` | Above 100% |
 
-The worker checks after each posting. Each threshold alerts once per line, shows on the budget, and writes a `budget.threshold_reached` event. **Sending that as a notification is Phase 6.** Two categories sharing one ledger account can't be in the same budget, because the ledger can't tell them apart.
+The worker checks after each posting. Each threshold alerts once per line, shows on the budget, and writes a `budget.threshold_reached` event. Phase 6 sends it as a notification. Two categories sharing one ledger account can't be in the same budget, because the ledger can't tell them apart.
 
 ### Step 5. Goals
 A goal has a target for revenue, net profit or cash balance over a month range. Progress is worked out when you read it, and the worker marks it `ACHIEVED` when the target is reached. A cash goal uses the balance at its end month, including money from before the goal began.
@@ -558,7 +706,7 @@ const members = await withBusinessScope(business, (tx) => tx.businessMember.find
 Businesses are never hard-deleted.
 
 ### Step 6. Invitations
-1. An owner or admin calls `POST /businesses/:id/invitations` and gets a token, once. It lasts 7 days. **There is no email yet, so share it by hand until Phase 6.**
+1. An owner or admin calls `POST /businesses/:id/invitations` and gets a token, once. It lasts 7 days. Phase 6 also emails it.
 2. The invited person logs in and calls `POST /invitations/accept` with the token.
 
 Their account email must match the invitation, so a stolen token is useless on another account. Inviting the same email again replaces the old invitation. Nobody can be invited as OWNER: an owner promotes an existing member instead.
@@ -731,13 +879,36 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | GET | `.../reports/profit-and-loss?from=&to=` | `finance.read` | Profit & loss |
 | GET | `.../reports/balance-sheet?asOf=` | `finance.read` | Balance sheet |
 | GET | `.../reports/cash-flow?from=&to=` | `finance.read` | Cash flow |
+| POST | `/auth/password/forgot` | none | Email a reset link. Answers the same for any email |
+| POST | `/auth/password/reset` | none | Set a new password with the link |
+| GET / POST | `/businesses/:businessId/tasks` | `tasks.read` / `tasks.write` | List (`mine`, `overdue`, dates) or create |
+| GET | `.../tasks/summary` | `tasks.read` | Counts by status, overdue and assigned to you |
+| GET | `.../tasks/calendar?from=&to=` | `tasks.read` | Tasks and reminders by day, up to 62 days |
+| GET / PATCH | `.../tasks/:taskId` | `tasks.read` / `tasks.write` | Read, change, or move the status |
+| GET / POST | `.../tasks/:taskId/comments` | `tasks.read` / `tasks.write` | List or add comments |
+| POST / DELETE | `.../tasks/:taskId/attachments` | `tasks.write` | Attach or remove a document |
+| GET | `/tasks` | Bearer | Tasks across every business you can read |
+| GET / POST | `/businesses/:businessId/reminders` | `tasks.read` / `tasks.write` | List or create |
+| GET / PATCH | `.../reminders/:reminderId` | `tasks.read` / `tasks.write` | Read, change, pause or cancel |
+| GET / POST | `/businesses/:businessId/recurring-schedules` | `finance.read` / `finance.write` | List or create (`kind: "SALARY"` for salaries) |
+| GET / PATCH | `.../recurring-schedules/:scheduleId` | `finance.read` / `finance.write` | Read with recent runs, change, pause, end |
+| POST | `.../recurring-schedules/:scheduleId/run` | `finance.write` | Run what's due now |
+| GET | `/notifications` | Bearer | Your in-app notifications |
+| GET | `/notifications/unread-count` | Bearer | How many are unread |
+| GET | `/notifications/stream` | Bearer | Live updates (Server-Sent Events) |
+| POST | `/notifications/:id/read`, `/notifications/read-all` | Bearer | Mark as read |
+| GET | `/notifications/:id/deliveries` | Bearer | What happened on each channel |
+| GET / PATCH | `/notifications/preferences` | Bearer | Channels and quiet hours |
+| GET | `/notifications/push/config` | Bearer | Whether push is on, and its public key |
+| GET / POST | `/notifications/push/subscriptions` | Bearer | This browser's push subscription |
+| DELETE | `/notifications/push/subscriptions/:id` | Bearer | Stop push to a browser |
 | GET / POST | `/businesses/:businessId/reconciliations` | `finance.read` / `ledger.post` | List or start |
 | GET | `.../reconciliations/:reconciliationId` | `finance.read` | Difference and unmatched lines |
 | POST | `.../reconciliations/:reconciliationId/lines` | `ledger.post` | Match lines |
 | DELETE | `.../reconciliations/:reconciliationId/lines/:journalLineId` | `ledger.post` | Un-match a line |
 | POST | `.../reconciliations/:reconciliationId/close` | `ledger.post` | Close (`adjust: true` also needs `transactions.approve`) |
 
-Outside `/api/v1`: `GET /health`, `GET /health/ready`, `GET /api/docs`.
+Outside `/api/v1`: `GET /health`, `GET /health/ready`, `GET /api/docs`, and `/admin/queues` if switched on.
 
 ### Try it
 
@@ -757,7 +928,7 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 
 **In the Postman app:**
 1. Click **Import** and choose that file.
-2. Make sure `npm run dev` is running, and `npm run worker` too if you want exports to finish. The collection's `baseUrl` variable defaults to `http://localhost:5001`.
+2. Make sure `npm run dev` is running, and `npm run worker` too if you want exports to finish and reminders and notifications to appear. The collection's `baseUrl` variable defaults to `http://localhost:5001`.
 3. Open the collection, click **Run**, and keep the requests in order.
 
 **From the terminal:**
@@ -773,6 +944,18 @@ docker exec business_os_redis redis-cli flushall
 ```
 
 ## How it was verified
+
+**Phase 6:**
+- **462 integration tests pass** (137 of them new).
+- **Hard cases are tested:** jobs run twice and at the same moment, stale jobs after an edit, a worker down for a week, closed periods, a creator who left or lost permission, HTML typed into a task title, links used twice at once, and push addresses aimed at the internal network.
+- **The real API, worker and mail server were run together** (Mailpit, not a real provider). All 264 Postman requests pass, with 425 assertions, reaching all 129 documented operations, and no jobs failed. Separately, a script confirmed: an invitation email whose link works, a live notification arriving without a refresh, a task reminder firing through BullMQ, a Bangla email, and a full password reset.
+- **Redis was emptied for real** with a reminder pending. Within a minute the timers restored themselves and rebuilt the job, and the reminder fired on time.
+- **The worker shut down cleanly** on a stop signal.
+- **Web push encryption was checked** against a local stand-in for a push service: the message was encrypted and signed, and an unsubscribed browser was recognised.
+- **As a role like Neon's owner:** the suite passes, on a database upgraded from Phase 5's tables. The migration only adds tables, so it doesn't touch existing rows.
+- **The protections were proven real:** switching off RLS on `tasks` or `notifications`, or removing the unique rule on recurring runs or notification keys, makes the matching tests fail.
+- **The production build ran too** (`npm start` and `npm run start:worker`), including the queue screen. The only Postman failures there were the 2 checks of the API docs page, which production doesn't serve on purpose.
+- **The tests caught a real bug:** a reminder job running a moment early would have found the same occurrence again and got stuck. Fixed.
 
 **Phase 5:**
 - **325 integration tests pass** (63 of them new), covering dashboards against the formal reports, budget and goal thresholds firing once, the outbox failure cases, and consolidation.
@@ -810,8 +993,12 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The Phase 5 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. Phases 2, 3 and 4's migrations did work on Neon.
-- **Phase 5's timing on Neon** hasn't been measured. Posting adds one query for the outbox event, on top of the 8.3 seconds measured in Phase 4.
+- **The Phase 5 and 6 migrations have not been run on Neon** (PostgreSQL 18). They were tested on PostgreSQL 17. Phases 2, 3 and 4's migrations did work on Neon.
+- **Phase 5 and 6's timing on Neon** hasn't been measured. Posting adds one query for the outbox event, on top of the 8.3 seconds measured in Phase 4.
+- **The worker's use of Neon** hasn't been measured. It checks the database every 2 seconds, which will probably stop Neon scaling to zero and can use up compute hours.
+- **A real email provider** hasn't been tried, only Mailpit. Real deliverability (spam folders, DKIM) depends on your provider.
+- **Web push in a real browser:** there is no frontend yet. Encryption was checked, but no browser has received one.
+- **The nightly jobs at their real times:** each was run directly and registered with BullMQ, but none has run overnight.
 - **Chrome on GitHub's runners:** the CI workflow installs Chrome and sets `CHROME_NO_SANDBOX`, but hasn't been seen to run.
 - **Cloudflare R2 or S3** have not been tried. Uploads were tested on MinIO only.
 - **GitHub Actions results** have not been checked.
@@ -819,9 +1006,11 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. Neon has the Phase 4 tables, but `db:provision` hadn't been run when last checked, so your existing business can't post until it is.
-2. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
-3. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. When last checked, Neon had the Phase 4 tables and `db:provision` hadn't been run, so your existing business can't post until it is.
+2. **Keep the worker running.** Reminders, emails and recurring transactions all depend on it.
+3. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
+4. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
+5. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
 
 ## Differences from the architecture document
 
@@ -842,37 +1031,36 @@ docker exec business_os_redis redis-cli flushall
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
 | Progressive login delay | Fixed lockout after 5 failures | Simpler, and it covers the same threat |
+| MJML email templates, one file per language | One TypeScript file with both languages | Email wording is short, and this adds no build step. Easy to change if emails get more complex |
+| Task status `TODO → IN_PROGRESS → DONE` | Also `TODO → DONE`, and reopening | Small tasks often skip a step, and mistakes need undoing |
+| "Mark overdue" on the task | `isOverdue` worked out when read | A stored flag would go stale between scans |
+| Salary schedules | A recurring expense on 6000 Salaries | Employees and withholding are in the document's future Payroll module |
 
 **Moved to a later phase:**
 | Item | Phase | Why |
 |---|---|---|
 | Foreign-currency accounts inside a business | When needed | **Moved from Phase 5.** Accounts in another currency can exist, but posting returns `FOREIGN_CURRENCY_NOT_SUPPORTED`. A business in USD works, and consolidation converts it. Doing this properly needs exchange gains and losses, which no phase covers |
-| Delivering budget and goal alerts | 6 | Events and alerts are saved now. Notifications arrive in Phase 6 |
-| Bull Board queue screen | 6 | Admin screen for queues. Failed jobs are in Redis and logs until then |
 | Fetching exchange rates automatically | When needed | You type them in, which keeps every figure traceable |
 | Exports of the consolidated view | When needed | The document's exports are per business |
-| Removing old export files and published outbox rows | 6 | Needs scheduled jobs. Harmless until then |
 | Statement lines, importing and auto-matching | 7 | Reconciliation works by hand until then |
-| Notifying approvers | 6 | Needs notifications. Pending items can be listed with `status=PENDING_APPROVAL` |
-| Nightly `ledger:verify` | 6 | Needs background jobs. Run it by hand until then |
+| Reminders from bills' due dates and from documents | Future, 8 | Bills don't exist yet, and reading deadlines from documents needs Phase 8's ingestion |
+| Salary withholding, employees, payslips | Future | The document's Payroll module. Salary schedules post the gross amount for now |
+| Custom notification choices per type | When needed | Preferences are per channel. The document only asks for channels and quiet hours |
 | Invoices, bills, and receivable and payable tracking | Future | Accrual-ready: the accounts exist, and manual journals work today |
-| Invitation emails | 6 | Needs email delivery. The token is returned to the inviter for now |
 | Malware scanning and OCR | 8 | `scan_status` is `NOT_SCANNED` until the ingestion pipeline exists |
-| Cleaning up abandoned uploads and expired idempotency keys | 6 | Needs background jobs. They do no harm until then |
 | Enforcing `enabledModules` per business | SaaS | The setting is stored, but nothing reads it yet |
 | Counterparties (customers and suppliers) | Not in any phase's list | The ER diagram has the table, but no phase includes the module. `counterparty_id` is added when it's built |
 | Custom fields | Not in any phase's list | Section 8.4 describes them, but no phase includes them |
 | Plan limits and custom roles | SaaS | The tables already allow custom roles; no endpoint yet |
-| Lockout and token-reuse emails, password reset | 6 | Needs email delivery. Until then these events go to the security log and audit |
-| Nightly audit check | 6 | Needs BullMQ. Run `npm run audit:verify` by hand until then |
-| `worker.ts` and the outbox | 3–6 | Nothing needs background work yet |
 | Monthly partitions on `audit_logs` | Later | A scaling step, not needed at this size |
 | Grafana, Loki and Tempo containers | 10 | The app already exports telemetry; only the receiving side is missing |
 
 **Known gap:** an upload URL stays valid for its full 15 minutes, even after the file is marked `READY`. Someone holding the link could replace the file with another of the same size and type, leaving the saved hash out of date. Phase 8's scanning step is the natural place to re-check the hash.
 
-**Known gap:** the document has no MFA recovery codes. Since password reset also waits for Phase 6, a user who loses their authenticator today can only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
+**Known gap:** the document has no MFA recovery codes. Password reset keeps MFA on, as it should, so a user who loses their authenticator can still only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
-## Before Phase 6
+**Known gap:** the Phase 6 stream authenticates once when it opens. A session revoked during those 15 minutes keeps receiving until the token's life ends.
 
-Phase 6 adds tasks, RRULE reminders with a reconciler, overdue scans, and email, in-app and push notifications, which also delivers the budget and goal alerts already being saved. It also adds recurring transactions, salary schedules, and nightly `audit:verify` and `ledger:verify` jobs. The worker it builds on already exists. Phase 7 (integrations) can run alongside it.
+## Before Phase 7
+
+Phase 7 adds integrations: an adapter for each provider, CSV and Excel import with mapping templates, sync history with retries, and automatic matching for reconciliation. It needs one answer from you: **which bank or MFS accounts do you actually have merchant or API access for?** That decides the first live adapter. If you have none yet, CSV and Excel import still work and can be built first.

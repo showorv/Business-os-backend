@@ -444,6 +444,85 @@ pm.collectionVariables.set("exportId", e.id);`] }),
     req("Check the status", "GET", `${FIN}/report-exports/{{exportId}}`, { auth: TOKEN, tests: [status(200), `pm.test("has a status", () => pm.expect(["QUEUED", "RUNNING", "READY"]).to.include(pm.response.json().data.status));`] }),
     req("Download link, once ready", "GET", `${FIN}/report-exports/{{exportId}}/download`, { auth: TOKEN, tests: [`pm.test("ready with a link, or not ready yet", () => pm.expect([200, 409]).to.include(pm.response.code));`] }),
   ]},
+  { name: "32. Tasks", item: [
+    req("Create a task", "POST", `${FIN}/tasks`, { auth: TOKEN, body: { title: "ভ্যাট রিটার্ন জমা দিন", priority: "HIGH", dueAt: "2030-03-10T04:00:00.000Z" }, tests: [status(201), `const t = pm.response.json().data;
+pm.test("starts as TODO", () => { pm.expect(t.status).to.eql("TODO"); pm.expect(t.isOverdue).to.eql(false); });
+pm.collectionVariables.set("taskId", t.id);`] }),
+    req("An overdue task", "POST", `${FIN}/tasks`, { auth: TOKEN, body: { title: "Overdue job", dueAt: "2026-01-01T04:00:00.000Z" }, tests: [status(201), `pm.test("is overdue", () => pm.expect(pm.response.json().data.isOverdue).to.eql(true));`] }),
+    req("Assignee must be a member", "POST", `${FIN}/tasks`, { auth: TOKEN, body: { title: "x", assigneeId: "00000000-0000-7000-8000-000000000000" }, tests: [status(422), errCode("ASSIGNEE_NOT_MEMBER")] }),
+    req("List tasks", "GET", `${FIN}/tasks`, { auth: TOKEN, tests: [status(200), `pm.test("two tasks", () => pm.expect(pm.response.json().data.items.length).to.eql(2));`] }),
+    req("Overdue view", "GET", `${FIN}/tasks?overdue=true`, { auth: TOKEN, tests: [status(200), `pm.test("one overdue", () => pm.expect(pm.response.json().data.items[0].title).to.eql("Overdue job"));`] }),
+    req("All businesses view", "GET", "/api/v1/tasks", { auth: TOKEN, tests: [status(200), `pm.test("says which business", () => pm.expect(pm.response.json().data.items[0].businessName).to.be.a("string"));`] }),
+    req("Summary", "GET", `${FIN}/tasks/summary`, { auth: TOKEN, tests: [status(200), `pm.test("counts", () => { const d = pm.response.json().data; pm.expect(d.todo).to.eql(2); pm.expect(d.overdue).to.eql(1); });`] }),
+    req("Calendar", "GET", `${FIN}/tasks/calendar?from=2030-03-01&to=2030-03-31`, { auth: TOKEN, tests: [status(200), `pm.test("on its local day", () => pm.expect(pm.response.json().data[0].date).to.eql("2030-03-10"));`] }),
+    req("Calendar range too long", "GET", `${FIN}/tasks/calendar?from=2030-01-01&to=2031-01-01`, { auth: TOKEN, tests: [status(422), errCode("DATE_RANGE_TOO_LONG")] }),
+    req("Read a task", "GET", `${FIN}/tasks/{{taskId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Start the task", "PATCH", `${FIN}/tasks/{{taskId}}`, { auth: TOKEN, body: { status: "IN_PROGRESS" }, tests: [status(200)] }),
+    req("Comment on it", "POST", `${FIN}/tasks/{{taskId}}/comments`, { auth: TOKEN, body: { body: "Collecting the papers" }, tests: [status(201)] }),
+    req("List comments", "GET", `${FIN}/tasks/{{taskId}}/comments`, { auth: TOKEN, tests: [status(200), `pm.test("one comment", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+    req("An unfinished upload can't attach", "POST", `${FIN}/tasks/{{taskId}}/attachments`, { auth: TOKEN, body: { documentId: "00000000-0000-7000-8000-000000000000" }, tests: [status(422), errCode("DOCUMENT_NOT_READY")] }),
+    req("Removing what isn't attached", "DELETE", `${FIN}/tasks/{{taskId}}/attachments/00000000-0000-7000-8000-000000000000`, { auth: TOKEN, tests: [status(404)] }),
+    req("Finish it", "PATCH", `${FIN}/tasks/{{taskId}}`, { auth: TOKEN, body: { status: "DONE" }, tests: [status(200), `pm.test("completed", () => pm.expect(pm.response.json().data.completedAt).to.be.a("string"));`] }),
+    req("A finished task can't go to BLOCKED", "PATCH", `${FIN}/tasks/{{taskId}}`, { auth: TOKEN, body: { status: "BLOCKED" }, tests: [status(409), errCode("TASK_STATUS_INVALID")] }),
+    req("Outsider gets 404", "GET", `${FIN}/tasks`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "33. Reminders", item: [
+    req("A reminder for 5 seconds from now", "POST", `${FIN}/reminders`, { auth: TOKEN, pre: `pm.collectionVariables.set("soon", new Date(Date.now() + 5000).toISOString());`, body: { title: "বাড়ি ভাড়া দিন", startsAt: "{{soon}}", channels: ["IN_APP"] }, tests: [status(201), `const r = pm.response.json().data;
+pm.test("has a time to fire", () => { pm.expect(r.status).to.eql("ACTIVE"); pm.expect(r.nextFireAt).to.be.a("string"); pm.expect(r.timezone).to.eql("Asia/Dhaka"); });
+pm.collectionVariables.set("soonReminderId", r.id);`] }),
+    req("A monthly reminder", "POST", `${FIN}/reminders`, { auth: TOKEN, body: { title: "Pay rent", startsAt: "2030-01-01T03:00:00.000Z", rrule: "FREQ=MONTHLY;BYMONTHDAY=1", leadMinutes: 1440 }, tests: [status(201), `const r = pm.response.json().data;
+pm.test("fires a day early", () => pm.expect(r.nextFireAt).to.eql("2029-12-31T03:00:00.000Z"));
+pm.collectionVariables.set("reminderId", r.id);`] }),
+    req("A rule that repeats too often", "POST", `${FIN}/reminders`, { auth: TOKEN, body: { title: "x", startsAt: "2030-01-01T03:00:00.000Z", rrule: "FREQ=MINUTELY" }, tests: [status(422)] }),
+    req("A time already gone", "POST", `${FIN}/reminders`, { auth: TOKEN, body: { title: "x", startsAt: "2020-01-01T03:00:00.000Z" }, tests: [status(422), errCode("REMINDER_NO_FUTURE_OCCURRENCE")] }),
+    req("List reminders", "GET", `${FIN}/reminders?sourceType=MANUAL`, { auth: TOKEN, tests: [status(200), `pm.test("two of mine", () => pm.expect(pm.response.json().data.items.length).to.eql(2));`] }),
+    req("Read a reminder", "GET", `${FIN}/reminders/{{reminderId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Pause it", "PATCH", `${FIN}/reminders/{{reminderId}}`, { auth: TOKEN, body: { status: "PAUSED" }, tests: [status(200), `pm.test("nothing to fire", () => pm.expect(pm.response.json().data.nextFireAt).to.eql(null));`] }),
+    req("A task's own reminder can't be edited", "GET", `${FIN}/reminders?sourceType=TASK`, { auth: TOKEN, tests: [status(200)] }),
+  ]},
+  { name: "34. Recurring schedules", item: [
+    req("A monthly expense", "POST", `${FIN}/recurring-schedules`, { auth: TOKEN, pre: `pm.collectionVariables.set("today", new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10));`, body: { name: "Office rent", rrule: "FREQ=MONTHLY", startDate: "{{today}}", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "3000000", remindDaysBefore: 3 }, tests: [status(201), `const s = pm.response.json().data;
+pm.test("active", () => { pm.expect(s.status).to.eql("ACTIVE"); pm.expect(s.type).to.eql("EXPENSE"); });
+pm.collectionVariables.set("scheduleId", s.id);`] }),
+    req("A monthly salary", "POST", `${FIN}/recurring-schedules`, { auth: TOKEN, body: { name: "রহিমের বেতন", kind: "SALARY", rrule: "FREQ=MONTHLY;BYMONTHDAY=-1", startDate: "{{today}}", accountId: "{{bankId}}", amountMinor: "4500000" }, tests: [status(201), `pm.test("finds its category", () => pm.expect(pm.response.json().data.categoryId).to.be.a("string"));`] }),
+    req("A salary can't use another category", "POST", `${FIN}/recurring-schedules`, { auth: TOKEN, body: { name: "x", kind: "SALARY", rrule: "FREQ=MONTHLY", startDate: "{{today}}", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "100" }, tests: [status(422), errCode("SALARY_CATEGORY_INVALID")] }),
+    req("A start in the past", "POST", `${FIN}/recurring-schedules`, { auth: TOKEN, body: { name: "x", rrule: "FREQ=MONTHLY", startDate: "2020-01-01", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "100" }, tests: [status(422), errCode("SCHEDULE_NO_FUTURE_OCCURRENCE")] }),
+    req("Run what's due", "POST", `${FIN}/recurring-schedules/{{scheduleId}}/run`, { auth: TOKEN, tests: [status(200), `const r = pm.response.json().data.runs;
+pm.test("made today's", () => { pm.expect(r.length).to.eql(1); pm.expect(r[0].status).to.eql("CREATED"); pm.expect(r[0].transactionId).to.be.a("string"); });`] }),
+    req("Running again adds nothing", "POST", `${FIN}/recurring-schedules/{{scheduleId}}/run`, { auth: TOKEN, tests: [status(200), `pm.test("still one", () => pm.expect(pm.response.json().data.runs.length).to.eql(1));`] }),
+    req("List schedules", "GET", `${FIN}/recurring-schedules?kind=SALARY`, { auth: TOKEN, tests: [status(200), `pm.test("one salary", () => pm.expect(pm.response.json().data.items.length).to.eql(1));`] }),
+    req("Read a schedule", "GET", `${FIN}/recurring-schedules/{{scheduleId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Pause it", "PATCH", `${FIN}/recurring-schedules/{{scheduleId}}`, { auth: TOKEN, body: { status: "PAUSED" }, tests: [status(200)] }),
+    req("A paused schedule won't run", "POST", `${FIN}/recurring-schedules/{{scheduleId}}/run`, { auth: TOKEN, tests: [status(409), errCode("SCHEDULE_NOT_ACTIVE")] }),
+    req("Outsider gets 404", "GET", `${FIN}/recurring-schedules`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "35. Notifications (the worker makes these)", item: [
+    req("Wait for the worker, then list", "GET", "/api/v1/notifications", { auth: TOKEN, pre: `setTimeout(() => {}, 9000);`, tests: [status(200), `const items = pm.response.json().data.items;
+pm.test("a type and values, not a sentence", () => { for (const n of items) { pm.expect(n.type).to.be.a("string"); pm.expect(n.subject).to.eql(undefined); } });
+const due = items.find((n) => n.type === "reminder.due");
+if (due) pm.collectionVariables.set("notificationId", due.id);
+else if (items[0]) pm.collectionVariables.set("notificationId", items[0].id);`] }),
+    req("Unread count", "GET", "/api/v1/notifications/unread-count", { auth: TOKEN, tests: [status(200)] }),
+    req("Only unread", "GET", "/api/v1/notifications?unreadOnly=true", { auth: TOKEN, tests: [status(200)] }),
+    req("How it was delivered", "GET", "/api/v1/notifications/{{notificationId}}/deliveries", { auth: TOKEN, tests: [`pm.test("found, or no worker running", () => pm.expect([200, 404, 422]).to.include(pm.response.code));`] }),
+    req("Mark one read", "POST", "/api/v1/notifications/{{notificationId}}/read", { auth: TOKEN, tests: [`pm.test("found, or no worker running", () => pm.expect([200, 404, 422]).to.include(pm.response.code));`] }),
+    req("Mark all read", "POST", "/api/v1/notifications/read-all", { auth: TOKEN, tests: [status(200)] }),
+    req("Nothing unread now", "GET", "/api/v1/notifications/unread-count", { auth: TOKEN, tests: [status(200), `pm.test("zero", () => pm.expect(pm.response.json().data.count).to.eql(0));`] }),
+    req("Read preferences", "GET", "/api/v1/notifications/preferences", { auth: TOKEN, tests: [status(200), `pm.test("on by default", () => pm.expect(pm.response.json().data.emailEnabled).to.eql(true));`] }),
+    req("Set quiet hours", "PATCH", "/api/v1/notifications/preferences", { auth: TOKEN, body: { quietHoursStart: "22:00", quietHoursEnd: "08:00" }, tests: [status(200)] }),
+    req("Half a pair is refused", "PATCH", "/api/v1/notifications/preferences", { auth: TOKEN, body: { quietHoursStart: "22:00" }, tests: [status(422)] }),
+    req("Push settings", "GET", "/api/v1/notifications/push/config", { auth: TOKEN, tests: [status(200)] }),
+    req("Browsers with push", "GET", "/api/v1/notifications/push/subscriptions", { auth: TOKEN, tests: [status(200)] }),
+    req("Only real push services", "POST", "/api/v1/notifications/push/subscriptions", { auth: TOKEN, body: { endpoint: "https://169.254.169.254/latest", keys: { p256dh: "a", auth: "b" } }, tests: [status(422)] }),
+    req("A real browser's subscription", "POST", "/api/v1/notifications/push/subscriptions", { auth: TOKEN, body: { endpoint: "https://fcm.googleapis.com/fcm/send/postman", keys: { p256dh: "a", auth: "b" } }, tests: [`pm.test("saved, or push switched off", () => pm.expect([201, 409]).to.include(pm.response.code));`, `if (pm.response.code === 201) pm.collectionVariables.set("pushId", pm.response.json().data.id);`] }),
+    req("Stop push to a browser", "DELETE", "/api/v1/notifications/push/subscriptions/00000000-0000-7000-8000-000000000000", { auth: TOKEN, tests: [status(404)] }),
+    req("The live stream needs signing in", "GET", "/api/v1/notifications/stream", { tests: [status(401)] }),
+    req("Someone else's notification", "POST", "/api/v1/notifications/00000000-0000-7000-8000-000000000000/read", { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "36. Forgotten password", item: [
+    req("An unknown email looks the same", "POST", `${A}/password/forgot`, { body: { email: "nobody@example.com" }, tests: [status(202)] }),
+    req("A made-up link is refused", "POST", `${A}/password/reset`, { body: { token: "made-up", password: "postman-new-password-2" }, tests: [status(400), errCode("PASSWORD_RESET_INVALID")] }),
+  ]},
 ];
 
 fs.writeFileSync(out, JSON.stringify({

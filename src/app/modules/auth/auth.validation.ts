@@ -27,9 +27,14 @@ const changePassword = z.object({
   newPassword: newPasswordField,
 });
 
+const forgotPassword = z.object({ email: emailField });
+const resetPassword = z.object({ token: z.string().min(1).max(200), password: newPasswordField });
+
 const sessionParams = z.object({ sessionId: z.uuid() });
 
 export const authValidation = {
+  forgotPassword,
+  resetPassword,
   register,
   login,
   mfaVerify,

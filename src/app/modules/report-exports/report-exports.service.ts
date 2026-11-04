@@ -18,6 +18,8 @@ import { AppError, ErrorCode } from "../../utils/errors.js";
 import { EventType, publishEvent } from "../../utils/outbox.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
+import { NotificationType } from "../notifications/notifications.interface.js";
+import { notificationsService } from "../notifications/notifications.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import { membersService } from "../members/members.service.js";
 import { reportsService } from "../reports/reports.service.js";
@@ -139,6 +141,22 @@ const updateStatus = (id: string, data: Prisma.ReportExportUpdateManyMutationInp
   prisma.reportExport.updateMany({ where: { id, status: { in: ["QUEUED", "RUNNING"] } }, data });
 
 // Runs in the worker. A repeat run of a finished export does nothing.
+const tellRequester = async (exportId: string, type: NotificationType) => {
+  const row = await prisma.reportExport.findUniqueOrThrow({ where: { id: exportId } });
+  await notificationsService.notifySafely([
+    {
+      type,
+      userId: row.requestedBy,
+      workspaceId: row.workspaceId,
+      businessId: row.businessId,
+      params: { report: row.report, format: row.format },
+      entityType: "report_export",
+      entityId: row.id,
+      dedupeKey: `${type}:${row.id}`,
+    },
+  ]);
+};
+
 const run = async (exportId: string) => {
   const row = await prisma.reportExport.findUnique({ where: { id: exportId } });
   if (!row || row.status === "READY" || row.status === "FAILED") return;
@@ -179,10 +197,13 @@ const run = async (exportId: string) => {
     fileName: `${row.report.toLowerCase().replaceAll("_", "-")}-${dates}.${format.extension}`,
     finishedAt: new Date(),
   });
+  await tellRequester(exportId, NotificationType.EXPORT_READY);
 };
 
 // When retries run out.
-const markFailed = (exportId: string) =>
-  updateStatus(exportId, { status: "FAILED", errorCode: ErrorCode.INTERNAL_ERROR, finishedAt: new Date() });
+const markFailed = async (exportId: string) => {
+  await updateStatus(exportId, { status: "FAILED", errorCode: ErrorCode.INTERNAL_ERROR, finishedAt: new Date() });
+  await tellRequester(exportId, NotificationType.EXPORT_FAILED);
+};
 
 export const reportExportsService = { request, list, getOne, getDownloadUrl, run, markFailed };

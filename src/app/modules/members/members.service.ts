@@ -74,6 +74,24 @@ const listBusinessesWithPermission = async (userId: string, permission: string, 
     .map((member) => member.business);
 };
 
+// Who should hear about something, such as the people who can approve a transaction.
+const listUserIdsWithPermission = async (businessId: string, permission: string) => {
+  const members = await prisma.businessMember.findMany({
+    where: {
+      businessId,
+      status: "ACTIVE",
+      OR: [{ extraPermissions: { has: permission } }, { role: { permissions: { some: { permissionKey: permission } } } }],
+    },
+    select: { userId: true },
+  });
+  return members.map((member) => member.userId);
+};
+
+const isActiveMember = async (tx: Prisma.TransactionClient, businessId: string, userId: string) => {
+  const member = await tx.businessMember.findUnique({ where: { businessId_userId: { businessId, userId } }, select: { status: true } });
+  return member?.status === "ACTIVE";
+};
+
 // Used on the transaction that creates the business, before any RLS scope can include it.
 const addOwner = async (
   tx: Prisma.TransactionClient,
@@ -247,6 +265,8 @@ export const membersService = {
   resolveContext,
   listMyMemberships,
   listBusinessesWithPermission,
+  listUserIdsWithPermission,
+  isActiveMember,
   addOwner,
   addFromInvitation,
   isActiveMemberByEmail,

@@ -7389,6 +7389,1921 @@
           }
         }
       ]
+    },
+    {
+      "name": "32. Tasks",
+      "item": [
+        {
+          "name": "Create a task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"starts as TODO\", () => { pm.expect(t.status).to.eql(\"TODO\"); pm.expect(t.isOverdue).to.eql(false); });",
+                  "pm.collectionVariables.set(\"taskId\", t.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"ভ্যাট রিটার্ন জমা দিন\",\n  \"priority\": \"HIGH\",\n  \"dueAt\": \"2030-03-10T04:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "An overdue task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"is overdue\", () => pm.expect(pm.response.json().data.isOverdue).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Overdue job\",\n  \"dueAt\": \"2026-01-01T04:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "Assignee must be a member",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is ASSIGNEE_NOT_MEMBER\", () => pm.expect(pm.response.json().error.code).to.eql(\"ASSIGNEE_NOT_MEMBER\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"assigneeId\": \"00000000-0000-7000-8000-000000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "List tasks",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"two tasks\", () => pm.expect(pm.response.json().data.items.length).to.eql(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "Overdue view",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one overdue\", () => pm.expect(pm.response.json().data.items[0].title).to.eql(\"Overdue job\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks?overdue=true"
+          }
+        },
+        {
+          "name": "All businesses view",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"says which business\", () => pm.expect(pm.response.json().data.items[0].businessName).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/tasks"
+          }
+        },
+        {
+          "name": "Summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"counts\", () => { const d = pm.response.json().data; pm.expect(d.todo).to.eql(2); pm.expect(d.overdue).to.eql(1); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/summary"
+          }
+        },
+        {
+          "name": "Calendar",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"on its local day\", () => pm.expect(pm.response.json().data[0].date).to.eql(\"2030-03-10\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/calendar?from=2030-03-01&to=2030-03-31"
+          }
+        },
+        {
+          "name": "Calendar range too long",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is DATE_RANGE_TOO_LONG\", () => pm.expect(pm.response.json().error.code).to.eql(\"DATE_RANGE_TOO_LONG\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/calendar?from=2030-01-01&to=2031-01-01"
+          }
+        },
+        {
+          "name": "Read a task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "Start the task",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"IN_PROGRESS\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "Comment on it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"body\": \"Collecting the papers\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}/comments"
+          }
+        },
+        {
+          "name": "List comments",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one comment\", () => pm.expect(pm.response.json().data.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}/comments"
+          }
+        },
+        {
+          "name": "An unfinished upload can't attach",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is DOCUMENT_NOT_READY\", () => pm.expect(pm.response.json().error.code).to.eql(\"DOCUMENT_NOT_READY\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentId\": \"00000000-0000-7000-8000-000000000000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}/attachments"
+          }
+        },
+        {
+          "name": "Removing what isn't attached",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}/attachments/00000000-0000-7000-8000-000000000000"
+          }
+        },
+        {
+          "name": "Finish it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"completed\", () => pm.expect(pm.response.json().data.completedAt).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"DONE\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "A finished task can't go to BLOCKED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is TASK_STATUS_INVALID\", () => pm.expect(pm.response.json().error.code).to.eql(\"TASK_STATUS_INVALID\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"BLOCKED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks/{{taskId}}"
+          }
+        },
+        {
+          "name": "Outsider gets 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/tasks"
+          }
+        }
+      ]
+    },
+    {
+      "name": "33. Reminders",
+      "item": [
+        {
+          "name": "A reminder for 5 seconds from now",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"soon\", new Date(Date.now() + 5000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"has a time to fire\", () => { pm.expect(r.status).to.eql(\"ACTIVE\"); pm.expect(r.nextFireAt).to.be.a(\"string\"); pm.expect(r.timezone).to.eql(\"Asia/Dhaka\"); });",
+                  "pm.collectionVariables.set(\"soonReminderId\", r.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"বাড়ি ভাড়া দিন\",\n  \"startsAt\": \"{{soon}}\",\n  \"channels\": [\n    \"IN_APP\"\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders"
+          }
+        },
+        {
+          "name": "A monthly reminder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"fires a day early\", () => pm.expect(r.nextFireAt).to.eql(\"2029-12-31T03:00:00.000Z\"));",
+                  "pm.collectionVariables.set(\"reminderId\", r.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Pay rent\",\n  \"startsAt\": \"2030-01-01T03:00:00.000Z\",\n  \"rrule\": \"FREQ=MONTHLY;BYMONTHDAY=1\",\n  \"leadMinutes\": 1440\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders"
+          }
+        },
+        {
+          "name": "A rule that repeats too often",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"startsAt\": \"2030-01-01T03:00:00.000Z\",\n  \"rrule\": \"FREQ=MINUTELY\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders"
+          }
+        },
+        {
+          "name": "A time already gone",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is REMINDER_NO_FUTURE_OCCURRENCE\", () => pm.expect(pm.response.json().error.code).to.eql(\"REMINDER_NO_FUTURE_OCCURRENCE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"x\",\n  \"startsAt\": \"2020-01-01T03:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders"
+          }
+        },
+        {
+          "name": "List reminders",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"two of mine\", () => pm.expect(pm.response.json().data.items.length).to.eql(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders?sourceType=MANUAL"
+          }
+        },
+        {
+          "name": "Read a reminder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders/{{reminderId}}"
+          }
+        },
+        {
+          "name": "Pause it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"nothing to fire\", () => pm.expect(pm.response.json().data.nextFireAt).to.eql(null));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAUSED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders/{{reminderId}}"
+          }
+        },
+        {
+          "name": "A task's own reminder can't be edited",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reminders?sourceType=TASK"
+          }
+        }
+      ]
+    },
+    {
+      "name": "34. Recurring schedules",
+      "item": [
+        {
+          "name": "A monthly expense",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"today\", new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const s = pm.response.json().data;",
+                  "pm.test(\"active\", () => { pm.expect(s.status).to.eql(\"ACTIVE\"); pm.expect(s.type).to.eql(\"EXPENSE\"); });",
+                  "pm.collectionVariables.set(\"scheduleId\", s.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Office rent\",\n  \"rrule\": \"FREQ=MONTHLY\",\n  \"startDate\": \"{{today}}\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"3000000\",\n  \"remindDaysBefore\": 3\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules"
+          }
+        },
+        {
+          "name": "A monthly salary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"finds its category\", () => pm.expect(pm.response.json().data.categoryId).to.be.a(\"string\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"রহিমের বেতন\",\n  \"kind\": \"SALARY\",\n  \"rrule\": \"FREQ=MONTHLY;BYMONTHDAY=-1\",\n  \"startDate\": \"{{today}}\",\n  \"accountId\": \"{{bankId}}\",\n  \"amountMinor\": \"4500000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules"
+          }
+        },
+        {
+          "name": "A salary can't use another category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is SALARY_CATEGORY_INVALID\", () => pm.expect(pm.response.json().error.code).to.eql(\"SALARY_CATEGORY_INVALID\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"x\",\n  \"kind\": \"SALARY\",\n  \"rrule\": \"FREQ=MONTHLY\",\n  \"startDate\": \"{{today}}\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"100\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules"
+          }
+        },
+        {
+          "name": "A start in the past",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is SCHEDULE_NO_FUTURE_OCCURRENCE\", () => pm.expect(pm.response.json().error.code).to.eql(\"SCHEDULE_NO_FUTURE_OCCURRENCE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"x\",\n  \"rrule\": \"FREQ=MONTHLY\",\n  \"startDate\": \"2020-01-01\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"100\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules"
+          }
+        },
+        {
+          "name": "Run what's due",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data.runs;",
+                  "pm.test(\"made today's\", () => { pm.expect(r.length).to.eql(1); pm.expect(r[0].status).to.eql(\"CREATED\"); pm.expect(r[0].transactionId).to.be.a(\"string\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules/{{scheduleId}}/run"
+          }
+        },
+        {
+          "name": "Running again adds nothing",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"still one\", () => pm.expect(pm.response.json().data.runs.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules/{{scheduleId}}/run"
+          }
+        },
+        {
+          "name": "List schedules",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one salary\", () => pm.expect(pm.response.json().data.items.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules?kind=SALARY"
+          }
+        },
+        {
+          "name": "Read a schedule",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules/{{scheduleId}}"
+          }
+        },
+        {
+          "name": "Pause it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"PAUSED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules/{{scheduleId}}"
+          }
+        },
+        {
+          "name": "A paused schedule won't run",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is SCHEDULE_NOT_ACTIVE\", () => pm.expect(pm.response.json().error.code).to.eql(\"SCHEDULE_NOT_ACTIVE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules/{{scheduleId}}/run"
+          }
+        },
+        {
+          "name": "Outsider gets 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/recurring-schedules"
+          }
+        }
+      ]
+    },
+    {
+      "name": "35. Notifications (the worker makes these)",
+      "item": [
+        {
+          "name": "Wait for the worker, then list",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 9000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().data.items;",
+                  "pm.test(\"a type and values, not a sentence\", () => { for (const n of items) { pm.expect(n.type).to.be.a(\"string\"); pm.expect(n.subject).to.eql(undefined); } });",
+                  "const due = items.find((n) => n.type === \"reminder.due\");",
+                  "if (due) pm.collectionVariables.set(\"notificationId\", due.id);",
+                  "else if (items[0]) pm.collectionVariables.set(\"notificationId\", items[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications"
+          }
+        },
+        {
+          "name": "Unread count",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/unread-count"
+          }
+        },
+        {
+          "name": "Only unread",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications?unreadOnly=true"
+          }
+        },
+        {
+          "name": "How it was delivered",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"found, or no worker running\", () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/{{notificationId}}/deliveries"
+          }
+        },
+        {
+          "name": "Mark one read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"found, or no worker running\", () => pm.expect([200, 404, 422]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/{{notificationId}}/read"
+          }
+        },
+        {
+          "name": "Mark all read",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/read-all"
+          }
+        },
+        {
+          "name": "Nothing unread now",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"zero\", () => pm.expect(pm.response.json().data.count).to.eql(0));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/unread-count"
+          }
+        },
+        {
+          "name": "Read preferences",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"on by default\", () => pm.expect(pm.response.json().data.emailEnabled).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/preferences"
+          }
+        },
+        {
+          "name": "Set quiet hours",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quietHoursStart\": \"22:00\",\n  \"quietHoursEnd\": \"08:00\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/notifications/preferences"
+          }
+        },
+        {
+          "name": "Half a pair is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quietHoursStart\": \"22:00\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/notifications/preferences"
+          }
+        },
+        {
+          "name": "Push settings",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/push/config"
+          }
+        },
+        {
+          "name": "Browsers with push",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/push/subscriptions"
+          }
+        },
+        {
+          "name": "Only real push services",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"https://169.254.169.254/latest\",\n  \"keys\": {\n    \"p256dh\": \"a\",\n    \"auth\": \"b\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/notifications/push/subscriptions"
+          }
+        },
+        {
+          "name": "A real browser's subscription",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"saved, or push switched off\", () => pm.expect([201, 409]).to.include(pm.response.code));",
+                  "if (pm.response.code === 201) pm.collectionVariables.set(\"pushId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"https://fcm.googleapis.com/fcm/send/postman\",\n  \"keys\": {\n    \"p256dh\": \"a\",\n    \"auth\": \"b\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/notifications/push/subscriptions"
+          }
+        },
+        {
+          "name": "Stop push to a browser",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/push/subscriptions/00000000-0000-7000-8000-000000000000"
+          }
+        },
+        {
+          "name": "The live stream needs signing in",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/stream"
+          }
+        },
+        {
+          "name": "Someone else's notification",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications/00000000-0000-7000-8000-000000000000/read"
+          }
+        }
+      ]
+    },
+    {
+      "name": "36. Forgotten password",
+      "item": [
+        {
+          "name": "An unknown email looks the same",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody@example.com\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/password/forgot"
+          }
+        },
+        {
+          "name": "A made-up link is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error code is PASSWORD_RESET_INVALID\", () => pm.expect(pm.response.json().error.code).to.eql(\"PASSWORD_RESET_INVALID\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"made-up\",\n  \"password\": \"postman-new-password-2\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/password/reset"
+          }
+        }
+      ]
     }
   ]
 }

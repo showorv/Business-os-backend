@@ -30,6 +30,14 @@ model User {
   createdBusinesses Business[]       @relation("BusinessCreator")
   memberships       BusinessMember[]
 
+  assignedTasks           Task[]                  @relation("TaskAssignee")
+  taskComments            TaskComment[]           @relation("TaskCommentAuthor")
+  reminders               Reminder[]              @relation("ReminderRecipient")
+  notifications           Notification[]
+  notificationPreference  NotificationPreference?
+  pushSubscriptions       PushSubscription[]
+  passwordResetTokens     PasswordResetToken[]
+
   @@map("users")
 }
 

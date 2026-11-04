@@ -34,3 +34,6 @@ addPath("MFA", { method: "post", path: "/auth/mfa/setup", summary: "Start TOTP s
 addPath("MFA", { method: "post", path: "/auth/mfa/confirm", summary: "Confirm setup with a code from the app", body: authValidation.mfaCode });
 addPath("MFA", { method: "post", path: "/auth/mfa/step-up", summary: "Prove MFA again for sensitive actions", body: authValidation.mfaCode, response: z.object({ accessToken: z.string(), expiresIn: z.number() }) });
 addPath("MFA", { method: "post", path: "/auth/mfa/disable", summary: "Turn MFA off", body: authValidation.mfaDisable });
+
+addPath("Auth", { method: "post", path: "/auth/password/forgot", summary: "Email a link to reset a password. Answers the same whether or not the email has an account", secured: false, body: authValidation.forgotPassword, response: z.object({ accepted: z.boolean() }), status: 202 });
+addPath("Auth", { method: "post", path: "/auth/password/reset", summary: "Set a new password with an emailed link. Signs out every session", secured: false, body: authValidation.resetPassword, response: z.object({ passwordChanged: z.boolean() }) });

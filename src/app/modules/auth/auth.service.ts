@@ -17,6 +17,8 @@ import {
 import { assertNotLocked, clearFailures, recordFailure } from "../../utils/lockout.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
+import { NotificationType } from "../notifications/notifications.interface.js";
+import { notificationsService } from "../notifications/notifications.service.js";
 import { usersService } from "../users/users.service.js";
 import type {
   AuthContext,
@@ -25,15 +27,25 @@ import type {
   IMfaDisableBody,
   IMfaVerifyBody,
   IRegisterBody,
+  IResetPasswordBody,
   IssuedTokens,
   LoginResult,
 } from "./auth.interface.js";
 
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000;
+const RESET_REQUEST_GAP_MS = 60 * 1000;
 const TOTP_ISSUER = "Business OS";
 const TOTP_STEP_SECONDS = 30;
 
 // Compared against when the email is unknown, so response time does not reveal who has an account.
 const dummyPasswordHash = bcrypt.hash(randomToken(), env.BCRYPT_COST);
+
+// A security alert must never stop the request it is about, so a failure here is only logged.
+const sendSecurityEmail = (userId: string, type: NotificationType) =>
+  notificationsService.notifySafely([
+    // One per hour, so someone guessing passwords cannot flood the inbox.
+    { type, userId, params: {}, dedupeKey: `${type}:${userId}:${Math.floor(Date.now() / (60 * 60 * 1000))}` },
+  ]);
 
 const refreshExpiry = () => new Date(Date.now() + env.REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
@@ -132,7 +144,8 @@ const login = async (body: ILoginBody, context: RequestContext): Promise<LoginRe
   const passwordMatches = await bcrypt.compare(body.password, user?.passwordHash ?? (await dummyPasswordHash));
 
   if (!user || !passwordMatches || user.status !== "ACTIVE") {
-    await recordFailure(lockKey);
+    const justLocked = await recordFailure(lockKey);
+    if (justLocked && user) await sendSecurityEmail(user.id, NotificationType.ACCOUNT_LOCKED);
     securityLogger.warn({ user_id: user?.id, request_id: context.requestId }, "login failed");
     await auditService.recordStandalone({
       action: "auth.login_failed",
@@ -311,11 +324,11 @@ const refresh = async (rawToken: string | undefined, context: RequestContext) =>
   });
 
   if (outcome.kind === "reused") {
-    // The security alert email is added in Phase 6, when email delivery exists.
     securityLogger.error(
       { user_id: outcome.userId, session_id: outcome.familyId, request_id: context.requestId },
       "refresh token reuse detected",
     );
+    await sendSecurityEmail(outcome.userId, NotificationType.SESSION_REUSE_DETECTED);
     throw new AppError(401, ErrorCode.REFRESH_REUSED);
   }
   if (outcome.kind === "invalid") throw new AppError(401, ErrorCode.REFRESH_INVALID);
@@ -563,6 +576,78 @@ const changePassword = async (auth: AuthContext, body: IChangePasswordBody, cont
       entityId: user.id,
     });
   });
+  await sendSecurityEmail(user.id, NotificationType.PASSWORD_CHANGED);
+};
+
+// Answers the same whether or not the email has an account, so nobody can test which emails do.
+const forgotPassword = async (email: string, context: RequestContext) => {
+  const user = await usersService.findByEmail(email);
+  if (!user || user.status !== "ACTIVE") return;
+
+  const recent = await prisma.passwordResetToken.count({
+    where: { userId: user.id, createdAt: { gt: new Date(Date.now() - RESET_REQUEST_GAP_MS) } },
+  });
+  if (recent > 0) return;
+
+  const token = randomToken();
+  await prisma.$transaction(async (tx) => {
+    // Only the newest link works.
+    await tx.passwordResetToken.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: new Date() } });
+    const reset = await tx.passwordResetToken.create({
+      data: { userId: user.id, tokenHash: sha256Hex(token), expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS) },
+    });
+    await auditService.record(tx, {
+      action: "auth.password_reset_requested",
+      context,
+      workspaceId: usersService.defaultWorkspaceId(user),
+      actorUserId: user.id,
+      entityType: "user",
+      entityId: user.id,
+    });
+    await notificationsService.dispatch(tx, [
+      {
+        type: NotificationType.PASSWORD_RESET,
+        userId: user.id,
+        params: { tokenEncrypted: encryptSecret(token, reset.id) },
+        entityType: "password_reset",
+        entityId: reset.id,
+        dedupeKey: `${NotificationType.PASSWORD_RESET}:${reset.id}`,
+      },
+    ]);
+  });
+};
+
+const resetPassword = async (body: IResetPasswordBody, context: RequestContext) => {
+  const passwordHash = await bcrypt.hash(body.password, env.BCRYPT_COST);
+
+  const user = await prisma.$transaction(async (tx) => {
+    // Marking it used in one statement means two requests with one link cannot both succeed.
+    const { count } = await tx.passwordResetToken.updateMany({
+      where: { tokenHash: sha256Hex(body.token), usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
+    if (count === 0) throw new AppError(400, ErrorCode.PASSWORD_RESET_INVALID);
+
+    const { userId } = await tx.passwordResetToken.findUniqueOrThrow({ where: { tokenHash: sha256Hex(body.token) } });
+    const owner = await usersService.findById(userId);
+    if (owner?.status !== "ACTIVE") throw new AppError(400, ErrorCode.PASSWORD_RESET_INVALID);
+
+    await usersService.setPasswordHash(tx, userId, passwordHash);
+    await revokeSessions(tx, { userId });
+    await usersService.bumpTokenVersion(tx, userId);
+    await auditService.record(tx, {
+      action: "auth.password_reset",
+      context,
+      workspaceId: usersService.defaultWorkspaceId(owner),
+      actorUserId: userId,
+      entityType: "user",
+      entityId: userId,
+    });
+    return owner;
+  });
+
+  await clearFailures(`login:${sha256Hex(user.email)}`);
+  await sendSecurityEmail(user.id, NotificationType.PASSWORD_CHANGED);
 };
 
 export const authService = {
@@ -580,4 +665,6 @@ export const authService = {
   disableMfa,
   stepUpMfa,
   changePassword,
+  forgotPassword,
+  resetPassword,
 };

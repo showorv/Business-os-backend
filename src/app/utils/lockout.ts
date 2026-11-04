@@ -25,10 +25,12 @@ export const assertNotLocked = async (key: string) => {
   }
 };
 
+// Says whether this failure is the one that locked the account.
 export const recordFailure = (key: string) =>
   failOpen(async () => {
     const count = await redis.incr(`lockout:${key}`);
     if (count === 1) await redis.expire(`lockout:${key}`, LOCK_SECONDS);
-  }, undefined);
+    return count === MAX_FAILURES;
+  }, false);
 
 export const clearFailures = (key: string) => failOpen(() => redis.del(`lockout:${key}`), 0);

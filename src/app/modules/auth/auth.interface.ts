@@ -9,6 +9,8 @@ export type IMfaSetupBody = z.infer<typeof authValidation.mfaSetup>;
 export type IMfaCodeBody = z.infer<typeof authValidation.mfaCode>;
 export type IMfaDisableBody = z.infer<typeof authValidation.mfaDisable>;
 export type IChangePasswordBody = z.infer<typeof authValidation.changePassword>;
+export type IForgotPasswordBody = z.infer<typeof authValidation.forgotPassword>;
+export type IResetPasswordBody = z.infer<typeof authValidation.resetPassword>;
 export type ISessionParams = z.infer<typeof authValidation.sessionParams>;
 
 // What the auth middleware puts on req.auth.

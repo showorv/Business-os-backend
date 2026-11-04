@@ -5,6 +5,11 @@ export const EventType = {
   REPORT_EXPORT_REQUESTED: "report_export.requested",
   BUDGET_THRESHOLD_REACHED: "budget.threshold_reached",
   GOAL_ACHIEVED: "goal.achieved",
+  TRANSACTION_SUBMITTED: "transaction.submitted",
+  TASK_ASSIGNED: "task.assigned",
+  TASK_COMMENTED: "task.commented",
+  REMINDER_CHANGED: "reminder.changed",
+  INVITATION_CREATED: "invitation.created",
 } as const;
 
 export type EventType = (typeof EventType)[keyof typeof EventType];

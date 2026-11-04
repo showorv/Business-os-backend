@@ -47,6 +47,15 @@ export const monthsBetween = (from: string, to: string) => {
   return months;
 };
 
+// A moment in time, with its local date and time in a timezone.
+export const formatDateTime = (moment: Date, locale: "en" | "bn-BD", digitStyle: "latin" | "bangla", timezone: string) =>
+  new Intl.DateTimeFormat(locale === "bn-BD" ? "bn-BD" : "en-GB", {
+    dateStyle: "long",
+    timeStyle: "short",
+    timeZone: timezone,
+    numberingSystem: digitStyle === "bangla" ? "beng" : "latn",
+  }).format(moment);
+
 export const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 
 // A date for people to read: "2 November 2026" or "২ নভেম্বর ২০২৬". Only ever for display.

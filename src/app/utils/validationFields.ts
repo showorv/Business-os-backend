@@ -27,3 +27,14 @@ export const totpCodeField = z
   .overwrite(normalizeDigits)
   .trim()
   .regex(/^\d{6}$/);
+
+const isTimezone = (value: string) => {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+export const timezoneField = z.string().refine(isTimezone, { message: "UNSUPPORTED_TIMEZONE" });

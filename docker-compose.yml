@@ -48,6 +48,14 @@ services:
     volumes:
       - minio_data:/data
 
+  # Catches every email in development. Read them at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.27
+    container_name: business_os_mailpit
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
 volumes:
   postgres_data:
   redis_data:
