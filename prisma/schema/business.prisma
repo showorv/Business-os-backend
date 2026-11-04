@@ -41,6 +41,12 @@ model Business {
     members     BusinessMember[]
     invitations Invitation[]
 
+    financialAccounts FinancialAccount[]
+    categories        Category[]
+    transactions      Transaction[]
+    documents         Document[]
+    sequences         BusinessSequence[]
+
     @@index([workspaceId])
     @@map("businesses")
 }

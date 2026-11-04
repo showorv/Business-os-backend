@@ -95,3 +95,63 @@ export const addMember = async (owner: Session, businessId: string, roleKey: str
   if (accepted.status !== 200) throw new Error(`accept failed: ${JSON.stringify(accepted.body)}`);
   return { ...member, memberId: accepted.body.data.memberId as string };
 };
+
+export interface FinanceSetup {
+  owner: Session;
+  auth: string;
+  businessId: string;
+  base: string;
+  cashId: string;
+  bankId: string;
+  salesId: string;
+  rentId: string;
+}
+
+// A business with its seeded Cash account and categories, plus a bank account.
+export const setupFinance = async (): Promise<FinanceSetup> => {
+  const owner = await registerUser();
+  const auth = bearer(owner);
+  const business = await createBusiness(owner);
+  const base = `${API}/businesses/${business.id}`;
+
+  const accounts = await api().get(`${base}/accounts`).set("Authorization", auth);
+  const categories = await api().get(`${base}/categories`).set("Authorization", auth);
+  const bank = await api().post(`${base}/accounts`).set("Authorization", auth).send({ name: "City Bank", type: "BANK" });
+  const named = (name: string) => categories.body.data.find((item: { name: string }) => item.name === name).id as string;
+
+  return {
+    owner,
+    auth,
+    businessId: business.id,
+    base,
+    cashId: accounts.body.data[0].id,
+    bankId: bank.body.data.id,
+    salesId: named("Sales"),
+    rentId: named("Rent"),
+  };
+};
+
+// The smallest bytes that really are a PDF and a PNG, for upload tests.
+export const PDF_BYTES = Buffer.from("%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n");
+export const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+export const putFile = (uploadUrl: string, bytes: Buffer, mime: string) =>
+  fetch(uploadUrl, { method: "PUT", body: new Uint8Array(bytes), headers: { "Content-Type": mime } });
+
+// Runs the whole upload flow and returns the finished document.
+export const uploadDocument = async (base: string, auth: string, bytes = PDF_BYTES, mime = "application/pdf") => {
+  const created = await api()
+    .post(`${base}/documents/uploads`)
+    .set("Authorization", auth)
+    .send({ type: "RECEIPT", fileName: "receipt.pdf", mime, sizeBytes: bytes.length });
+  if (created.status !== 201) throw new Error(`upload failed: ${JSON.stringify(created.body)}`);
+  const put = await putFile(created.body.data.uploadUrl, bytes, mime);
+  if (!put.ok) throw new Error(`put failed: ${put.status}`);
+
+  const done = await api().post(`${base}/documents/${created.body.data.document.id}/complete`).set("Authorization", auth);
+  if (done.status !== 200) throw new Error(`complete failed: ${JSON.stringify(done.body)}`);
+  return done.body.data as { id: string; sha256: string };
+};

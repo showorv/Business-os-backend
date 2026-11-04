@@ -44,7 +44,7 @@ pm.test("returns tokens", () => { pm.expect(d.accessToken).to.be.a("string"); pm
 pm.collectionVariables.set("accessToken", d.accessToken);
 pm.collectionVariables.set("csrfToken", d.csrfToken);`;
 
-const req = (name, method, path, { auth, body, csrf, tests = [], pre, headers = [], raw } = {}) => ({
+const req = (name, method, path, { auth, body, csrf, tests = [], pre, headers = [], raw, contentType = "application/json" } = {}) => ({
   name,
   event: [
     ...(pre ? [{ listen: "prerequest", script: { type: "text/javascript", exec: pre.split("\n") } }] : []),
@@ -54,24 +54,29 @@ const req = (name, method, path, { auth, body, csrf, tests = [], pre, headers = 
     method,
     auth: auth ? { type: "bearer", bearer: [{ key: "token", value: auth === true ? "{{accessToken}}" : auth, type: "string" }] } : { type: "noauth" },
     header: [
-      ...(body || raw ? [{ key: "Content-Type", value: "application/json" }] : []),
+      ...(body || raw ? [{ key: "Content-Type", value: contentType }] : []),
       ...(csrf ? [{ key: "X-CSRF-Token", value: "{{csrfToken}}" }] : []),
       ...headers,
     ],
     ...(body ? { body: { mode: "raw", raw: JSON.stringify(body, null, 2) } } : {}),
     ...(raw ? { body: { mode: "raw", raw } } : {}),
-    url: `{{baseUrl}}${path}`,
+    // A path starting with {{ is already a full URL, such as a signed upload link.
+    url: path.startsWith("{{") ? path : `{{baseUrl}}${path}`,
   },
 });
 
 const A = "/api/v1/auth", U = "/api/v1/users", AU = "/api/v1/audit", B = "/api/v1/businesses";
 const BIZ = `${B}/{{businessId}}`;
+const FIN = `${B}/{{finBusinessId}}`;
 const creds = (password = "{{password}}") => ({ email: "{{email}}", password });
+
+// A real, minimal PDF for the upload requests. Its length must equal sizeBytes.
+const PDF = "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
 
 const item = [
   { name: "1. Platform", item: [
     req("Health", "GET", "/health", { tests: [status(200)] }),
-    req("Readiness", "GET", "/health/ready", { tests: [status(200), `pm.test("database and redis up", () => pm.expect(pm.response.json().data).to.eql({ database: true, redis: true }));`] }),
+    req("Readiness", "GET", "/health/ready", { tests: [status(200), `pm.test("everything is up", () => pm.expect(pm.response.json().data).to.eql({ database: true, redis: true, storage: true }));`] }),
     req("OpenAPI spec", "GET", "/api/docs/openapi.json", { tests: [status(200), `pm.test("documents the API", () => pm.expect(pm.response.json().paths).to.have.property("/api/v1/auth/login"));`] }),
     req("Unknown route", "GET", "/api/v1/nope", { tests: [status(404), errCode("NOT_FOUND")] }),
   ]},
@@ -219,6 +224,76 @@ pm.collectionVariables.set("ownerMemberId", m[0].id);`] }),
     req("Archive", "POST", `${BIZ}/status`, { auth: "{{ownerToken}}", body: { status: "ARCHIVED" }, tests: [status(200)] }),
     req("Archived is hidden from the list", "GET", B, { auth: "{{ownerToken}}", tests: [status(200), `pm.test("hidden", () => pm.expect(pm.response.json().data.length).to.eql(0));`] }),
     req("Archived can be listed on request", "GET", `${B}?includeArchived=true`, { auth: "{{ownerToken}}", tests: [status(200), `pm.test("shown", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+  ]},
+
+  // Phase 3. A fresh business, because the one above ended up archived.
+  { name: "16. Accounts", item: [
+    req("Register finance owner", "POST", `${A}/register`, {
+      pre: `pm.collectionVariables.set("financeEmail", "finance" + Date.now() + "@example.com");`,
+      body: { name: "Finance Owner", email: "{{financeEmail}}", password: "{{password}}" },
+      tests: [status(201), `pm.collectionVariables.set("financeToken", pm.response.json().data.accessToken);`],
+    }),
+    req("Create business", "POST", B, { auth: "{{financeToken}}", body: { name: "Finance Traders", type: "RETAIL" }, tests: [status(201), `pm.collectionVariables.set("finBusinessId", pm.response.json().data.id);`] }),
+    req("Seeded Cash account", "GET", `${FIN}/accounts`, { auth: "{{financeToken}}", tests: [status(200), `const a = pm.response.json().data;
+pm.test("one Cash account", () => { pm.expect(a.length).to.eql(1); pm.expect(a[0].type).to.eql("CASH"); });
+pm.collectionVariables.set("cashId", a[0].id);`] }),
+    req("Create bank account", "POST", `${FIN}/accounts`, { auth: "{{financeToken}}", body: { name: "City Bank", type: "BANK", openingBalanceMinor: "5000000", openingDate: "2026-07-01", accountNumber: "1234-5678-9012" }, tests: [status(201), `const a = pm.response.json().data;
+pm.test("masked, money as string", () => { pm.expect(a.maskedNumber).to.eql("****9012"); pm.expect(a.openingBalanceMinor).to.eql("5000000"); });
+pm.collectionVariables.set("bankId", a.id);`] }),
+    req("Create account - duplicate name", "POST", `${FIN}/accounts`, { auth: "{{financeToken}}", body: { name: "city bank", type: "BANK" }, tests: [status(409), errCode("NAME_TAKEN")] }),
+    req("Create account - decimal amount", "POST", `${FIN}/accounts`, { auth: "{{financeToken}}", body: { name: "Bad", type: "BANK", openingBalanceMinor: "10.50" }, tests: [status(422), errCode("VALIDATION_FAILED")] }),
+    req("Get account", "GET", `${FIN}/accounts/{{bankId}}`, { auth: "{{financeToken}}", tests: [status(200)] }),
+    req("Update account", "PATCH", `${FIN}/accounts/{{bankId}}`, { auth: "{{financeToken}}", body: { name: "City Bank Main" }, tests: [status(200)] }),
+    req("Outsider gets 404", "GET", `${FIN}/accounts`, { auth: "{{outsiderToken}}", tests: [status(404), errCode("NOT_FOUND")] }),
+  ]},
+  { name: "17. Categories", item: [
+    req("Seeded expense categories", "GET", `${FIN}/categories?type=EXPENSE`, { auth: "{{financeToken}}", tests: [status(200), `const c = pm.response.json().data;
+pm.test("bilingual", () => pm.expect(c.find((x) => x.name === "Rent").nameBn).to.eql("ভাড়া"));
+pm.collectionVariables.set("rentId", c.find((x) => x.name === "Rent").id);`] }),
+    req("Seeded income categories", "GET", `${FIN}/categories?type=INCOME`, { auth: "{{financeToken}}", tests: [status(200), `pm.collectionVariables.set("salesId", pm.response.json().data.find((x) => x.name === "Sales").id);`] }),
+    req("Create category", "POST", `${FIN}/categories`, { auth: "{{financeToken}}", body: { type: "EXPENSE", name: "Internet" }, tests: [status(201), `pm.collectionVariables.set("categoryId", pm.response.json().data.id);`] }),
+    req("Update category", "PATCH", `${FIN}/categories/{{categoryId}}`, { auth: "{{financeToken}}", body: { nameBn: "ইন্টারনেট" }, tests: [status(200)] }),
+  ]},
+  { name: "18. Documents", item: [
+    req("Start upload - type not allowed", "POST", `${FIN}/documents/uploads`, { auth: "{{financeToken}}", body: { type: "RECEIPT", fileName: "x.html", mime: "text/html", sizeBytes: 10 }, tests: [status(422)] }),
+    req("Start upload", "POST", `${FIN}/documents/uploads`, { auth: "{{financeToken}}", body: { type: "RECEIPT", fileName: "receipt.pdf", mime: "application/pdf", sizeBytes: PDF.length }, tests: [status(201), `const u = pm.response.json().data;
+pm.collectionVariables.set("documentId", u.document.id);
+pm.collectionVariables.set("uploadUrl", u.uploadUrl);`] }),
+    req("Complete before uploading", "POST", `${FIN}/documents/{{documentId}}/complete`, { auth: "{{financeToken}}", tests: [status(409), errCode("DOCUMENT_NOT_UPLOADED")] }),
+    req("Upload the file to storage", "PUT", "{{uploadUrl}}", { raw: PDF, contentType: "application/pdf", tests: [status(200)] }),
+    req("Complete", "POST", `${FIN}/documents/{{documentId}}/complete`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("ready, with a hash", () => { const d = pm.response.json().data; pm.expect(d.status).to.eql("READY"); pm.expect(d.sha256).to.have.lengthOf(64); });`] }),
+    req("List documents", "GET", `${FIN}/documents`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("one document", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+    req("Download link", "GET", `${FIN}/documents/{{documentId}}/download`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("signed URL", () => pm.expect(pm.response.json().data.url).to.include("X-Amz-Signature"));`] }),
+  ]},
+  { name: "19. Transactions", item: [
+    req("Create expense", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", headers: [{ key: "Idempotency-Key", value: "{{idempotencyKey}}" }],
+      pre: `pm.collectionVariables.set("idempotencyKey", "postman-" + Date.now());`,
+      body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "3000000", txnDate: "2026-11-01", description: "Rent" },
+      tests: [status(201), `const t = pm.response.json().data;
+pm.test("draft with a number", () => { pm.expect(t.status).to.eql("DRAFT"); pm.expect(t.number).to.eql("TXN-2026-000001"); pm.expect(t.amountMinor).to.eql("3000000"); });
+pm.collectionVariables.set("transactionId", t.id);`] }),
+    req("Retry with the same key", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", headers: [{ key: "Idempotency-Key", value: "{{idempotencyKey}}" }],
+      body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "3000000", txnDate: "2026-11-01", description: "Rent" },
+      tests: [status(201), `pm.test("same transaction, replayed", () => { pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get("transactionId")); pm.expect(pm.response.headers.get("Idempotency-Replayed")).to.eql("true"); });`] }),
+    req("Same key, different body", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", headers: [{ key: "Idempotency-Key", value: "{{idempotencyKey}}" }],
+      body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "1", txnDate: "2026-11-01" },
+      tests: [status(422), errCode("IDEMPOTENCY_KEY_REUSED")] }),
+    req("Wrong category type", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{salesId}}", amountMinor: "100", txnDate: "2026-11-01" }, tests: [status(422), errCode("CATEGORY_TYPE_MISMATCH")] }),
+    req("Possible duplicate is flagged", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "3000000", txnDate: "2026-11-02" }, tests: [status(201), `const t = pm.response.json().data;
+pm.test("flagged", () => pm.expect(t.possibleDuplicate).to.eql(true));
+pm.collectionVariables.set("duplicateId", t.id);`] }),
+    req("Dismiss the flag", "POST", `${FIN}/transactions/{{duplicateId}}/dismiss-duplicate`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("cleared", () => pm.expect(pm.response.json().data.possibleDuplicate).to.eql(false));`] }),
+    req("Transfer with a fee", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", body: { type: "TRANSFER", accountId: "{{bankId}}", toAccountId: "{{cashId}}", amountMinor: "1000000", feeMinor: "18500", txnDate: "2026-11-03" }, tests: [status(201)] }),
+    req("Transfer to the same account", "POST", `${FIN}/transactions`, { auth: "{{financeToken}}", body: { type: "TRANSFER", accountId: "{{bankId}}", toAccountId: "{{bankId}}", amountMinor: "100", txnDate: "2026-11-03" }, tests: [status(422), errCode("TRANSFER_ACCOUNTS_INVALID")] }),
+    req("List with filters", "GET", `${FIN}/transactions?type=EXPENSE&from=2026-11-01&to=2026-11-30`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("two expenses", () => pm.expect(pm.response.json().data.length).to.eql(2));`] }),
+    req("Update draft", "PATCH", `${FIN}/transactions/{{transactionId}}`, { auth: "{{financeToken}}", body: { description: "November rent" }, tests: [status(200)] }),
+    req("Attach document", "POST", `${FIN}/transactions/{{transactionId}}/attachments`, { auth: "{{financeToken}}", body: { documentId: "{{documentId}}" }, tests: [status(200)] }),
+    req("Get with attachments", "GET", `${FIN}/transactions/{{transactionId}}`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("one attachment", () => pm.expect(pm.response.json().data.attachments.length).to.eql(1));`] }),
+    req("Document in use cannot be deleted", "DELETE", `${FIN}/documents/{{documentId}}`, { auth: "{{financeToken}}", tests: [status(409), errCode("DOCUMENT_IN_USE")] }),
+    req("Detach document", "DELETE", `${FIN}/transactions/{{transactionId}}/attachments/{{documentId}}`, { auth: "{{financeToken}}", tests: [status(200)] }),
+    req("Delete document", "DELETE", `${FIN}/documents/{{documentId}}`, { auth: "{{financeToken}}", tests: [status(200)] }),
+    req("Void draft", "POST", `${FIN}/transactions/{{transactionId}}/void`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("voided", () => pm.expect(pm.response.json().data.status).to.eql("VOID"));`] }),
+    req("Voided cannot be edited", "PATCH", `${FIN}/transactions/{{transactionId}}`, { auth: "{{financeToken}}", body: { description: "x" }, tests: [status(409), errCode("TRANSACTION_NOT_EDITABLE")] }),
   ]},
 ];
 

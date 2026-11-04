@@ -4,6 +4,8 @@ import "./auth.docs.js";
 import "./users.docs.js";
 import "./audit.docs.js";
 import "./businesses.docs.js";
+import "./finance.docs.js";
+import "./documents.docs.js";
 import { registry } from "./registry.js";
 
 export const buildOpenApiDocument = () =>

@@ -5,8 +5,13 @@ import { shutdownTelemetry } from "./instrument.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { redis } from "./lib/redis.js";
+import { ensureBucket } from "./lib/storage.js";
 
 await prisma.$connect();
+
+// Local MinIO starts empty. Elsewhere the bucket already exists, so a failure here is only logged
+// and /health/ready reports it.
+await ensureBucket().catch((error) => logger.error({ err: error }, "storage bucket check failed"));
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, "API listening");

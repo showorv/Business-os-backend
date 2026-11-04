@@ -7,9 +7,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | Phase | Name | Status |
 |---|---|---|
 | 1 | Foundation & auth | ✅ Done |
-| **2** | **Multi-business (businesses, members, RBAC, RLS)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 3 | Accounts & transactions | ⬜ Next |
-| 4 | Double-entry ledger | ⬜ |
+| 2 | Multi-business (businesses, members, RBAC, RLS) | ✅ Done |
+| **3** | **Accounts & transactions** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 4 | Double-entry ledger | ⬜ Next |
 | 5 | Analytics & reports | ⬜ |
 | 6 | Tasks & reminders (BullMQ, email) | ⬜ |
 | 7 | Integrations (bKash, banks, CSV) | ⬜ |
@@ -61,12 +61,12 @@ npm run dev
 
 **Step 7. Check it**
 
-- http://localhost:5001/health/ready should show `database: true` and `redis: true`
+- http://localhost:5001/health/ready should show `database`, `redis` and `storage` as `true`
 - http://localhost:5001/api/docs is Swagger UI, where you can try every endpoint (not served in production)
 
 ### Which database does `.env` use?
 
-Your `.env` points to **Neon**. Every new phase's migration must be applied there with `npm run db:deploy`.
+Your `.env` points to **Neon**. Every new phase's migration must be applied there with `npm run db:deploy`. Redis and MinIO still run locally in Docker, so keep Docker running.
 
 To use local Docker instead, set both `DATABASE_URL` and `DIRECT_DATABASE_URL` to `postgresql://business_os:business_os@localhost:5432/business_os`.
 
@@ -83,6 +83,7 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run db:migrate` | Creates a new migration after you change `prisma/schema/*` |
 | `npm run db:deploy` | Applies existing migrations |
 | `npm run db:status` | Shows which migrations are applied |
+| `npm run db:provision` | Gives older businesses any starting data added since they were created. Safe to repeat |
 | `npm run audit:verify` | Checks the audit hash chain; exits with 1 if it finds tampering |
 | `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
 | `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
@@ -94,16 +95,16 @@ src/
 ├── server.ts              Starts the API and shuts it down cleanly
 ├── app.ts                 Express app: the middleware order lives here
 ├── instrument.ts          OpenTelemetry + Sentry, loaded before everything else
-├── lib/                   prisma, redis, logger, rls (the business transaction helper)
-├── scripts/verify-audit.ts
+├── lib/                   prisma, redis, logger, storage (S3), rls (the business transaction helper)
+├── scripts/               verify-audit, provision-businesses
 ├── types/express.d.ts     Adds req.auth, req.requestId, req.validated
 └── app/
     ├── config/            env.config.ts (validated environment)
-    ├── constants/         permissions.ts (permission and role names)
+    ├── constants/         permissions, categoryTemplates
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
-    ├── utils/             errors, jwt, cookies, crypto, lockout, normalize, validationFields...
+    ├── utils/             errors, money, dates, pagination, idempotency, jwt, cookies, crypto, lockout...
     └── modules/
         ├── auth/          auth.router / controller / service / validation / interface
         ├── users/         same five files
@@ -111,9 +112,13 @@ src/
         ├── businesses/    same five files
         ├── members/       same five files
         ├── invitations/   same five files
-        └── roles/         same five files
+        ├── roles/         same five files
+        ├── accounts/      same five files
+        ├── categories/    same five files
+        ├── documents/     same five files
+        └── transactions/  same five files
 prisma/
-├── schema/                schema, workspace, auth, business and audit models
+├── schema/                schema, workspace, auth, business, finance, document and audit models
 └── migrations/
 postman/                   Collection and the script that generates it
 tests/                     Integration tests against real Postgres and Redis
@@ -160,14 +165,80 @@ requireAuth              who are you?
 
 1. **Tables:** add models in `prisma/schema/`, then run `npx prisma migrate dev --create-only --name your_change`.
 2. **Isolation:** for each business table, add `workspace_id` and `business_id`, and in the migration add the `GRANT`s and the RLS policy. Copy the pattern from the `invitations` table in `prisma/migrations/*_multi_business_rbac_rls/`.
-3. **Code:** create the five files in `src/app/modules/<name>/`.
+3. **Code:** create the five files in `src/app/modules/<name>/`. `accounts` is the simplest one to copy.
 4. **Business data:** in the service, run every query inside `withBusinessScope(business, (tx) => ...)`, and write audit rows with `auditService.recordForBusiness(tx, business, ...)` in that same transaction.
-5. **Routes:** add one line in `src/app/routes/index.ts`. Use `Router({ mergeParams: true })` for routes under a business.
+5. **Routes:** add one line in `src/app/routes/index.ts`. Use `Router({ mergeParams: true })` for routes under a business, and guard them with `businessRead(permission)` or `businessWrite(permission)`.
 6. **Docs and tests:** add a `*.docs.ts` file, a line in `docs/openapi.ts`, a test file, and a folder in `postman/generate-collection.mjs`.
+
+**Shared helpers to reuse:** `minorAmountField` for money, `dateField` for dates, `paginationQuery` with `pageArgs` and `toPage` for lists, and `withIdempotency` for create requests that clients may retry.
 
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 3
+
+**The goal:** record where money lives and what happened to it, as safe, validated **drafts**. Nothing touches the books yet: posting to the ledger is Phase 4.
+
+### Step 1. Tables
+| Table | Purpose |
+|---|---|
+| `financial_accounts` | Cash, bank, bKash, Nagad, other MFS and custom accounts |
+| `categories` | Income and expense categories, with English and Bangla names |
+| `transactions` | Income, expense, transfer, refund and adjustment drafts |
+| `transaction_attachments` | Links transactions to documents |
+| `documents` | Uploaded files; the bytes live in object storage |
+| `business_sequences` | Counters for `TXN-2026-000123` numbers |
+| `idempotency_keys` | Saved responses, so retries are safe |
+
+All are protected by RLS, as in Phase 2. The restricted database role can't delete from them, except for attachment links.
+
+### Step 2. Money
+All money is a whole number of minor units (paisa for BDT), stored as `BIGINT`, and sent as a **string**: `"3000000"` means ৳30,000.00. A JSON number would silently lose precision on large amounts. Decimals and negatives are refused, and Bangla digits are accepted. See `src/app/utils/money.ts`.
+
+### Step 3. New business setup
+Creating a business now also creates a Cash account and starting categories for its type, in the same transaction. For businesses that already existed, run `npm run db:provision`.
+
+### Step 4. Financial accounts
+Accounts are never deleted, only deactivated. Only the last 4 digits of an account number are stored (`****9012`). The opening balance can't be edited after creation, because in Phase 4 it becomes a posted journal.
+
+### Step 5. Transactions
+Everything is created as a `DRAFT` with its own number. Drafts can be edited or voided, never deleted. These rules apply on both create and edit:
+
+| Rule | Error code |
+|---|---|
+| Account must be active and in this business | `ACCOUNT_NOT_USABLE` |
+| Category must be active and in this business | `CATEGORY_NOT_USABLE` |
+| Income and refund use an income category; expense uses an expense category | `CATEGORY_TYPE_MISMATCH` |
+| Income, expense and refund need a category | `CATEGORY_REQUIRED` |
+| A transfer needs two different accounts | `TRANSFER_ACCOUNTS_INVALID` |
+| A transfer has no category | `CATEGORY_NOT_ALLOWED` |
+| Only a transfer can have a fee | `FEE_NOT_ALLOWED` |
+| Currency must match the account, and both sides of a transfer | `CURRENCY_MISMATCH` |
+
+The database also refuses a zero amount and an invalid transfer, in case the code ever misses one.
+
+### Step 6. Idempotency (safe retries)
+If a connection drops after you send a request, you can't tell whether it worked, and a retry could record the same expense twice. So the client sends a unique `Idempotency-Key` header:
+
+- **Same key, same body:** returns the first response with `Idempotency-Replayed: true` and creates nothing.
+- **Same key, different body:** `IDEMPOTENCY_KEY_REUSED`.
+- **The first attempt failed:** the key isn't used up, so a retry runs normally.
+- **Simultaneous retries:** only one transaction is created.
+
+Keys belong to one user and last 24 hours. The key is saved in the same transaction as the data, so one can't exist without the other.
+
+### Step 7. Duplicate detection
+This is different from idempotency: it catches the same real-world payment entered twice. A transaction is flagged as `possibleDuplicate` when another one has the same account, type and amount within 2 days, and no conflicting reference. It's only a flag, because a repeat payment can be real, so the user decides with `POST .../dismiss-duplicate`.
+
+### Step 8. Documents
+Files go straight to object storage, so large uploads never pass through the API:
+
+1. `POST /documents/uploads` returns a signed URL, valid for 15 minutes.
+2. The client sends the file with `PUT` to that URL, using the same `Content-Type`.
+3. `POST /documents/:id/complete` reads the stored file, checks its real size and type, and saves its SHA-256 hash.
+
+A file whose bytes don't match what it claims is removed and marked `REJECTED`. PDF, PNG, JPEG and WebP are allowed, up to 25 MB. Downloads use a 5-minute link that always downloads rather than opening in the browser. Deleting a document hides it but keeps the file, and a document attached to a transaction can't be deleted.
 
 ## What was built in Phase 2
 
@@ -199,7 +270,7 @@ const members = await withBusinessScope(business, (tx) => tx.businessMember.find
 // Even with no WHERE, PostgreSQL returns only this business's rows.
 ```
 
-`business_os_app` has no `DELETE` on any table, no `UPDATE` on `audit_logs`, and no access to `users`. All the settings last only for that transaction, so they are safe on pooled connections.
+`business_os_app` has no `DELETE` on these tables, no `UPDATE` on `audit_logs`, and no access to `users`. All the settings last only for that transaction, so they are safe on pooled connections.
 
 **When the normal connection is still used:** only where no business scope can exist yet: login, creating a business, accepting an invitation, and checking membership itself.
 
@@ -341,6 +412,21 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | DELETE | `/businesses/:businessId/invitations/:invitationId` | `members.manage` | Revoke an invite |
 | POST | `/invitations/accept` | Bearer | Join with a token |
 | GET | `/businesses/:businessId/audit` | `audit.read` | One business's audit trail |
+| POST / GET | `/businesses/:businessId/accounts` | `finance.write` / `finance.read` | Create or list accounts |
+| GET / PATCH | `/businesses/:businessId/accounts/:accountId` | `finance.read` / `finance.write` | Read or edit an account |
+| POST / GET | `/businesses/:businessId/categories` | `finance.write` / `finance.read` | Create or list categories |
+| PATCH | `/businesses/:businessId/categories/:categoryId` | `finance.write` | Edit a category |
+| POST / GET | `/businesses/:businessId/transactions` | `finance.write` / `finance.read` | Create a draft or list with filters |
+| GET / PATCH | `/businesses/:businessId/transactions/:transactionId` | `finance.read` / `finance.write` | Read or edit a draft |
+| POST | `.../transactions/:transactionId/void` | `finance.write` | Void a draft |
+| POST | `.../transactions/:transactionId/dismiss-duplicate` | `finance.write` | Clear a duplicate flag |
+| POST | `.../transactions/:transactionId/attachments` | `finance.write` | Attach a document |
+| DELETE | `.../transactions/:transactionId/attachments/:documentId` | `finance.write` | Remove an attachment |
+| POST | `/businesses/:businessId/documents/uploads` | `documents.write` | Get a signed upload URL |
+| POST | `/businesses/:businessId/documents/:documentId/complete` | `documents.write` | Check the file and mark it ready |
+| GET | `/businesses/:businessId/documents` | `documents.read` | List documents |
+| GET | `/businesses/:businessId/documents/:documentId/download` | `documents.read` | Get a download link |
+| DELETE | `/businesses/:businessId/documents/:documentId` | `documents.write` | Soft delete |
 
 Outside `/api/v1`: `GET /health`, `GET /health/ready`, `GET /api/docs`.
 
@@ -358,7 +444,7 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 
 ### Test every endpoint with Postman
 
-`postman/Business_OS.postman_collection.json` has 86 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
+`postman/Business_OS.postman_collection.json` has 123 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
 
 **In the Postman app:**
 1. Click **Import** and choose that file.
@@ -371,13 +457,19 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 npm run test:postman
 ```
 
-Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. A run registers 6 times and sign-ups are limited to 10 per 10 minutes, so a second run soon after gets `429`. On local Docker Redis you can clear the limits with:
+Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. A run registers 7 times and sign-ups are limited to 10 per 10 minutes, so a second run soon after gets `429`. On local Docker Redis you can clear the limits with:
 
 ```bash
 docker exec business_os_redis redis-cli flushall
 ```
 
 ## How it was verified
+
+**Phase 3:**
+- **194 integration tests pass** (67 of them new), with real file uploads to MinIO. They cover precision on large amounts, simultaneous retries, simultaneous numbering, every transaction rule, fake file types and ids from other businesses.
+- **The suite also passes as a role like Neon's owner**, on a temporary PostgreSQL 17 database. With RLS switched off on `financial_accounts`, the tests fail, as they should.
+- **All 123 Postman requests pass** on the built server, run with Newman on a temporary local database. They reach all 50 documented operations.
+- **Timed with Neon-like delay** (260ms per round trip, simulated locally): creating a transaction takes about 4.5 seconds, a business about 3.8 and a list about 1.6.
 
 **Phase 2:**
 - **127 integration tests pass** (55 of them new), covering cross-business access, role permissions, invitations, owner protections and lifecycle.
@@ -392,14 +484,16 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The Phase 2 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17.
+- **The Phase 3 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. Phase 2's migration did work on Neon.
+- **Cloudflare R2 or S3** have not been tried. Uploads were tested on MinIO only.
 - **GitHub Actions results** have not been checked.
 - **Real Sentry and Grafana accounts** have not been connected.
 
 ## What still needs you
 
-1. **Apply the Phase 2 migration to Neon:** run `npm run db:deploy`, then try one business request in Postman.
-2. **Answer the document's open questions** before later phases: hosting target, LLM provider, whether accrual accounting is needed at launch, and which bank and MFS credentials you hold.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision` to give your existing business its Cash account and categories.
+2. **Decide on accrual accounting before Phase 4:** is it needed at launch (invoices, AR/AP), or is cash-basis enough? This is one of the document's open questions, and it shapes the posting rules.
+3. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
 
 ## Differences from the architecture document
 
@@ -410,6 +504,7 @@ docker exec business_os_redis redis-cli flushall
 | `src/modules`, `src/infrastructure`, `src/shared` | `src/app/modules`, `src/lib`, `src/app/utils` | Follows the skeleton you had already started |
 | A separate login for the app's database role | One login that switches to `business_os_app` inside business transactions | Login and sign-up need access RLS would block, and this needs no second password |
 | Accountant "read own" audit | Uses `GET /audit/me` | Every user already has it, so no extra permission is needed |
+| Opening balance posts a journal; account row linked to the ledger | `current_balance_minor` starts at the opening balance | The ledger is Phase 4, which replaces this with a real journal |
 | `X-Business-Id` header mentioned in one diagram | Business id in the URL | The document's other sections use the URL, and it keeps routes explicit |
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
@@ -419,9 +514,15 @@ docker exec business_os_redis redis-cli flushall
 | Item | Phase | Why |
 |---|---|---|
 | Invitation emails | 6 | Needs email delivery. The token is returned to the inviter for now |
-| Business setup: categories and Cash account | 3 | Added inside `businessesService.create`, in the same transaction |
-| Business setup: chart of accounts and fiscal periods | 4 | Same place |
+| Business setup: chart of accounts and fiscal periods | 4 | Added in `businessesService.provision` |
+| Approval flow, posting, reversals and the fiscal period check | 4 | Drafts are all that exist until the ledger does |
+| Linking accounts and categories to ledger accounts | 4 | The chart of accounts doesn't exist yet |
+| Malware scanning and OCR | 8 | `scan_status` is `NOT_SCANNED` until the ingestion pipeline exists |
+| Cleaning up abandoned uploads and expired idempotency keys | 6 | Needs background jobs. They do no harm until then |
+| Enforcing `enabledModules` per business | SaaS | The setting is stored, but nothing reads it yet |
 | Blocking a base currency change once journals are posted | 4 | No journals exist yet. Until then the change is allowed; a comment marks the spot |
+| Counterparties (customers and suppliers) | Not in any phase's list | The ER diagram has the table, but no phase includes the module. `counterparty_id` is added when it's built |
+| Custom fields | Not in any phase's list | Section 8.4 describes them, but no phase includes them |
 | Approval threshold being enforced | 4 | The setting is stored now; transactions arrive later |
 | Consolidated "all businesses" endpoints | 5 | Listed under Analytics in the roadmap |
 | Plan limits and custom roles | SaaS | The tables already allow custom roles; no endpoint yet |
@@ -431,8 +532,10 @@ docker exec business_os_redis redis-cli flushall
 | Monthly partitions on `audit_logs` | Later | A scaling step, not needed at this size |
 | Grafana, Loki and Tempo containers | 10 | The app already exports telemetry; only the receiving side is missing |
 
+**Known gap:** an upload URL stays valid for its full 15 minutes, even after the file is marked `READY`. Someone holding the link could replace the file with another of the same size and type, leaving the saved hash out of date. Phase 8's scanning step is the natural place to re-check the hash.
+
 **Known gap:** the document has no MFA recovery codes. Since password reset also waits for Phase 6, a user who loses their authenticator today can only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
-## Before Phase 3
+## Before Phase 4
 
-Phase 3 adds financial accounts (Cash, bank, bKash, Nagad, custom), categories, transaction APIs with idempotency and duplicate detection, and signed document uploads. Every new table follows [How to add a new module](#how-to-add-a-new-module-use-this-in-every-phase).
+Phase 4 is the critical gate: chart of accounts templates, journals, the posting engine, fiscal periods, reversals, period close, and the trial balance, P&L, balance sheet and cash flow. Drafts from Phase 3 become `POSTED` there, and analytics, budgets, integrations and AI all wait until its test suite is green.

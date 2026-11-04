@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Prisma } from "../../../lib/prisma.js";
 import { prisma } from "../../../lib/prisma.js";
 import { withBusinessScope } from "../../../lib/rls.js";
+import { bigintToString } from "../../utils/money.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import type { AuditEntry, ChainVerification, IListAuditQuery, IListBusinessAuditQuery } from "./audit.interface.js";
 
@@ -43,7 +44,9 @@ const computeHash = (prevHash: Uint8Array | null, row: HashInput) =>
     .digest();
 
 const toJson = (value: unknown) =>
-  value === undefined || value === null ? null : (JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue);
+  value === undefined || value === null
+    ? null
+    : (JSON.parse(JSON.stringify(value, bigintToString)) as Prisma.InputJsonValue);
 
 // Use the text PostgreSQL will store, so the hash still matches when the row is read back.
 const canonicalIp = async (tx: Prisma.TransactionClient, ip: string | null) => {

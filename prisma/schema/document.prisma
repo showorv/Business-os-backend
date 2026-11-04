@@ -1,0 +1,40 @@
+enum DocumentType {
+    INVOICE
+    RECEIPT
+    CONTRACT
+    POLICY
+    NOTE
+}
+
+enum DocumentStatus {
+    PENDING_UPLOAD
+    READY
+    REJECTED
+}
+
+model Document {
+    id           String         @id @default(uuid(7)) @db.Uuid
+    workspaceId  String         @map("workspace_id") @db.Uuid
+    businessId   String         @map("business_id") @db.Uuid
+    type         DocumentType
+    status       DocumentStatus @default(PENDING_UPLOAD)
+    fileName     String         @map("file_name")
+    storageKey   String         @unique @map("storage_key")
+    mime         String
+    sizeBytes    BigInt         @map("size_bytes")
+    // Filled in by the server from the stored file when the upload completes.
+    sha256       String?
+    // Phase 8 adds malware scanning and text extraction.
+    scanStatus   String         @default("NOT_SCANNED") @map("scan_status")
+    ingestStatus String         @default("NOT_STARTED") @map("ingest_status")
+    deletedAt    DateTime?      @map("deleted_at") @db.Timestamptz(3)
+    createdBy    String         @map("created_by") @db.Uuid
+    createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business    Business                @relation(fields: [businessId], references: [id])
+    attachments TransactionAttachment[]
+
+    @@index([businessId, id(sort: Desc)])
+    @@map("documents")
+}

@@ -2,10 +2,13 @@ import type { Prisma } from "../../../lib/prisma.js";
 import { prisma } from "../../../lib/prisma.js";
 import { withBusinessScope, withRls } from "../../../lib/rls.js";
 import { invalidateBusinessContext } from "../../utils/businessContextCache.js";
+import { todayInTimezone, toDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import type { RequestContext } from "../../utils/requestContext.js";
+import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
+import { categoriesService } from "../categories/categories.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import { membersService } from "../members/members.service.js";
 import type {
@@ -17,6 +20,7 @@ import type {
 import { defaultBusinessSettings } from "./businesses.validation.js";
 
 type BusinessStatus = IChangeStatusBody["status"];
+type BusinessType = ICreateBusinessBody["type"];
 
 const ALLOWED_TRANSITIONS: Record<BusinessStatus, BusinessStatus[]> = {
   ACTIVE: ["INACTIVE", "ARCHIVED"],
@@ -24,8 +28,22 @@ const ALLOWED_TRANSITIONS: Record<BusinessStatus, BusinessStatus[]> = {
   ARCHIVED: ["ACTIVE"],
 };
 
-// One transaction: a business never exists without its owner. Later phases add their setup here
-// (Phase 3 categories and the Cash account, Phase 4 chart of accounts and fiscal periods).
+// The starting data every business needs. Phase 4 adds the chart of accounts and fiscal periods.
+// Safe to run twice, which lets src/scripts/provision-businesses.ts repair older businesses.
+const provision = async (
+  tx: Prisma.TransactionClient,
+  business: { id: string; workspaceId: string; type: BusinessType; baseCurrency: string; timezone: string; createdBy: string },
+) => {
+  const owner = { workspaceId: business.workspaceId, businessId: business.id, createdBy: business.createdBy };
+  await accountsService.ensureCashAccount(tx, {
+    ...owner,
+    currency: business.baseCurrency,
+    openingDate: toDbDate(todayInTimezone(business.timezone)),
+  });
+  await categoriesService.seedDefaults(tx, owner, business.type);
+};
+
+// One transaction: a business never exists without its owner and starting data.
 // It uses the normal connection because the new id cannot be in an RLS scope before it exists.
 const create = (auth: AuthContext, body: ICreateBusinessBody, context: RequestContext) =>
   prisma.$transaction(async (tx) => {
@@ -40,6 +58,7 @@ const create = (auth: AuthContext, body: ICreateBusinessBody, context: RequestCo
 
     const owner = { workspaceId: auth.workspaceId, businessId: business.id, userId: auth.userId, createdBy: auth.userId };
     await membersService.addOwner(tx, owner);
+    await provision(tx, business);
 
     await auditService.record(tx, {
       action: "business.created",
@@ -85,8 +104,8 @@ const changedFields = (before: Record<string, unknown>, after: Record<string, un
   return { before: pick(before), after: pick(after) };
 };
 
-const update = (business: BusinessContext, body: IUpdateBusinessBody, context: RequestContext) =>
-  withBusinessScope(business, async (tx) => {
+const update = async (business: BusinessContext, body: IUpdateBusinessBody, context: RequestContext) => {
+  const updated = await withBusinessScope(business, async (tx) => {
     const before = await tx.business.findUniqueOrThrow({ where: { id: business.businessId } });
 
     // Phase 4: refuse a baseCurrency change once the business has posted journals.
@@ -108,6 +127,16 @@ const update = (business: BusinessContext, body: IUpdateBusinessBody, context: R
     });
     return after;
   });
+
+  // The business context carries the currency and timezone.
+  await invalidateBusinessContext(business.businessId);
+  return updated;
+};
+
+const getTransactionPrefix = async (tx: Prisma.TransactionClient, businessId: string) => {
+  const { settings } = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { settings: true } });
+  return (settings as { transactionPrefix: string }).transactionPrefix;
+};
 
 const changeStatus = async (business: BusinessContext, status: BusinessStatus, context: RequestContext) => {
   if (!ALLOWED_TRANSITIONS[business.businessStatus].includes(status)) {
@@ -131,4 +160,4 @@ const changeStatus = async (business: BusinessContext, status: BusinessStatus, c
   return updated;
 };
 
-export const businessesService = { create, listMine, getOne, update, changeStatus };
+export const businessesService = { provision, create, listMine, getOne, update, changeStatus, getTransactionPrefix };

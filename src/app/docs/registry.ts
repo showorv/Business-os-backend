@@ -47,6 +47,7 @@ interface PathSpec {
   status?: number;
   secured?: boolean;
   csrf?: boolean;
+  idempotent?: boolean;
 }
 
 export const addPath = (tag: string, spec: PathSpec) => {
@@ -62,6 +63,7 @@ export const addPath = (tag: string, spec: PathSpec) => {
       ...(spec.query ? { query: spec.query } : {}),
       ...(spec.params ? { params: spec.params } : {}),
       ...(spec.csrf ? { headers: z.object({ "x-csrf-token": z.string() }) } : {}),
+      ...(spec.idempotent ? { headers: z.object({ "idempotency-key": z.string().optional() }) } : {}),
     },
     responses: {
       [spec.status ?? 200]: {

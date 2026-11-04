@@ -18,7 +18,8 @@
     "audit:verify": "tsx src/scripts/verify-audit.ts",
     "postinstall": "prisma skills sync || exit 0",
     "postman:build": "node postman/generate-collection.mjs",
-    "test:postman": "newman run postman/Business_OS.postman_collection.json"
+    "test:postman": "newman run postman/Business_OS.postman_collection.json",
+    "db:provision": "tsx src/scripts/provision-businesses.ts"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +27,8 @@
   "type": "module",
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^9.1.0",
+    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/s3-request-presigner": "^3.1161.0",
     "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/exporter-metrics-otlp-http": "^0.300.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.300.0",
@@ -48,6 +51,7 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",
     "express": "^5.3.0",
+    "file-type": "^22.3.0",
     "helmet": "^8.3.0",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",

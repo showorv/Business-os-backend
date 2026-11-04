@@ -10,13 +10,17 @@ import { rateLimit } from "./app/middlewares/rateLimit.js";
 import { requestId } from "./app/middlewares/requestId.js";
 import { requestLogger } from "./app/middlewares/requestLogger.js";
 import apiRoutes from "./app/routes/index.js";
+import { bigintToString } from "./app/utils/money.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
 import { redis } from "./lib/redis.js";
+import { checkStorage } from "./lib/storage.js";
 
 const app = express();
 
 app.set("trust proxy", env.TRUST_PROXY);
+// Money is BIGINT, and JSON has no BIGINT: it travels as an integer string.
+app.set("json replacer", bigintToString);
 app.use(requestId);
 app.use(requestLogger);
 
@@ -34,12 +38,13 @@ app.get("/health/ready", async (_req, res) => {
       return false;
     }
   };
-  const [database, cache] = await Promise.all([
+  const [database, cache, storage] = await Promise.all([
     check("database", () => prisma.$queryRaw`SELECT 1`),
     check("redis", () => redis.ping()),
+    check("storage", checkStorage),
   ]);
-  const ready = database && cache;
-  res.status(ready ? 200 : 503).json({ success: ready, data: { database, redis: cache } });
+  const ready = database && cache && storage;
+  res.status(ready ? 200 : 503).json({ success: ready, data: { database, redis: cache, storage } });
 });
 
 // Registered before helmet because Swagger UI needs inline styles. Never served in production.

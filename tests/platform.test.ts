@@ -10,7 +10,7 @@ describe("health", () => {
     expect((await api().get("/health")).status).toBe(200);
     const ready = await api().get("/health/ready");
     expect(ready.status).toBe(200);
-    expect(ready.body.data).toEqual({ database: true, redis: true });
+    expect(ready.body.data).toEqual({ database: true, redis: true, storage: true });
   });
 });
 

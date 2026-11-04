@@ -36,6 +36,12 @@ const envSchema = z
     BCRYPT_COST: z.coerce.number().int().min(4).max(15).default(12),
     COOKIE_DOMAIN: optionalString,
 
+    S3_ENDPOINT: z.url(),
+    S3_REGION: z.string().default("us-east-1"),
+    S3_ACCESS_KEY: z.string().min(1),
+    S3_SECRET_KEY: z.string().min(1),
+    S3_BUCKET: z.string().min(3),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })

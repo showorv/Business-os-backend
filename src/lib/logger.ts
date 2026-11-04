@@ -17,6 +17,8 @@ const sensitiveKeys = [
   "secret",
   "encryptedSecret",
   "pin",
+  "accountNumber",
+  "uploadUrl",
 ];
 
 export const redactPaths = [

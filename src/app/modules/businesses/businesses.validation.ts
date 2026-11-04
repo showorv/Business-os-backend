@@ -1,8 +1,6 @@
 import { z } from "zod";
 import { normalizeDigits } from "../../utils/normalize.js";
-import { textField } from "../../utils/validationFields.js";
-
-const SUPPORTED_CURRENCIES = new Set(Intl.supportedValuesOf("currency"));
+import { currencyField, textField } from "../../utils/validationFields.js";
 
 const isTimezone = (value: string) => {
   try {
@@ -13,10 +11,6 @@ const isTimezone = (value: string) => {
   }
 };
 
-const currencyField = z
-  .string()
-  .toUpperCase()
-  .refine((value) => SUPPORTED_CURRENCIES.has(value), { message: "UNSUPPORTED_CURRENCY" });
 const timezoneField = z.string().refine(isTimezone, { message: "UNSUPPORTED_TIMEZONE" });
 const fiscalMonthField = z.coerce.number().int().min(1).max(12);
 

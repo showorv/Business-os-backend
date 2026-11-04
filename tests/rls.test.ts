@@ -166,6 +166,61 @@ describe("Row-Level Security at the database", () => {
   });
 });
 
+describe("Row-Level Security on finance tables", () => {
+  const TABLES = [
+    "financial_accounts",
+    "categories",
+    "transactions",
+    "transaction_attachments",
+    "documents",
+    "business_sequences",
+  ];
+
+  it("every business table has RLS switched on and a policy", async () => {
+    const rows = await prisma.$queryRaw<{ tablename: string; rowsecurity: boolean; policies: bigint }[]>`
+      SELECT t.tablename, t.rowsecurity,
+        (SELECT count(*) FROM pg_policies p WHERE p.tablename = t.tablename) AS policies
+      FROM pg_tables t WHERE t.schemaname = 'public'`;
+
+    const expected = [...TABLES, "businesses", "business_members", "invitations", "audit_logs", "idempotency_keys"];
+    for (const table of expected) {
+      const row = rows.find((item) => item.tablename === table);
+      expect(row?.rowsecurity, table).toBe(true);
+      expect(Number(row?.policies), table).toBeGreaterThan(0);
+    }
+  });
+
+  it("a query with no WHERE sees only this business's accounts and categories", async () => {
+    const { alice, aliceBiz } = await twoBusinesses();
+    const result = await withRls({ userId: alice.userId, businessIds: [aliceBiz.id] }, async (tx) => ({
+      accounts: await tx.financialAccount.findMany(),
+      categories: await tx.category.findMany(),
+    }));
+    expect(result.accounts.length).toBe(1);
+    expect(result.categories.length).toBeGreaterThan(0);
+    expect([...result.accounts, ...result.categories].every((row) => row.businessId === aliceBiz.id)).toBe(true);
+    expect(await prisma.financialAccount.count()).toBe(2);
+  });
+
+  it("idempotency keys of other users are invisible", async () => {
+    const { alice, bob, aliceBiz } = await twoBusinesses();
+    await prisma.idempotencyKey.create({
+      data: { userId: bob.userId, key: "bobs-key-123", requestHash: "x", statusCode: 201, responseBody: {}, expiresAt: new Date(Date.now() + 1000) },
+    });
+    const rows = await withRls({ userId: alice.userId, businessIds: [aliceBiz.id] }, (tx) => tx.idempotencyKey.findMany());
+    expect(rows).toEqual([]);
+  });
+
+  it("cannot delete financial rows", async () => {
+    const { alice, aliceBiz } = await twoBusinesses();
+    const inScope = (sql: string) =>
+      withRls({ userId: alice.userId, businessIds: [aliceBiz.id] }, (tx) => tx.$executeRawUnsafe(sql));
+    for (const table of ["financial_accounts", "categories", "transactions", "documents"]) {
+      await expect(inScope(`DELETE FROM ${table}`), table).rejects.toThrow(/permission denied/);
+    }
+  });
+});
+
 describe("audit chain across RLS", () => {
   it("stays intact when rows are written from different businesses in one workspace", async () => {
     const owner = await registerUser();

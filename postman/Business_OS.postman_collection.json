@@ -92,7 +92,7 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
-                  "pm.test(\"database and redis up\", () => pm.expect(pm.response.json().data).to.eql({ database: true, redis: true }));"
+                  "pm.test(\"everything is up\", () => pm.expect(pm.response.json().data).to.eql({ database: true, redis: true, storage: true }));"
                 ]
               }
             }
@@ -3022,6 +3022,1343 @@
             },
             "header": [],
             "url": "{{baseUrl}}/api/v1/businesses?includeArchived=true"
+          }
+        }
+      ]
+    },
+    {
+      "name": "16. Accounts",
+      "item": [
+        {
+          "name": "Register finance owner",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"financeEmail\", \"finance\" + Date.now() + \"@example.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"financeToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Finance Owner\",\n  \"email\": \"{{financeEmail}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/register"
+          }
+        },
+        {
+          "name": "Create business",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"finBusinessId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Finance Traders\",\n  \"type\": \"RETAIL\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses"
+          }
+        },
+        {
+          "name": "Seeded Cash account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json().data;",
+                  "pm.test(\"one Cash account\", () => { pm.expect(a.length).to.eql(1); pm.expect(a[0].type).to.eql(\"CASH\"); });",
+                  "pm.collectionVariables.set(\"cashId\", a[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Create bank account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const a = pm.response.json().data;",
+                  "pm.test(\"masked, money as string\", () => { pm.expect(a.maskedNumber).to.eql(\"****9012\"); pm.expect(a.openingBalanceMinor).to.eql(\"5000000\"); });",
+                  "pm.collectionVariables.set(\"bankId\", a.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"City Bank\",\n  \"type\": \"BANK\",\n  \"openingBalanceMinor\": \"5000000\",\n  \"openingDate\": \"2026-07-01\",\n  \"accountNumber\": \"1234-5678-9012\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Create account - duplicate name",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is NAME_TAKEN\", () => pm.expect(pm.response.json().error.code).to.eql(\"NAME_TAKEN\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"city bank\",\n  \"type\": \"BANK\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Create account - decimal amount",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is VALIDATION_FAILED\", () => pm.expect(pm.response.json().error.code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bad\",\n  \"type\": \"BANK\",\n  \"openingBalanceMinor\": \"10.50\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Get account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts/{{bankId}}"
+          }
+        },
+        {
+          "name": "Update account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"City Bank Main\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts/{{bankId}}"
+          }
+        },
+        {
+          "name": "Outsider gets 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"error code is NOT_FOUND\", () => pm.expect(pm.response.json().error.code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts"
+          }
+        }
+      ]
+    },
+    {
+      "name": "17. Categories",
+      "item": [
+        {
+          "name": "Seeded expense categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const c = pm.response.json().data;",
+                  "pm.test(\"bilingual\", () => pm.expect(c.find((x) => x.name === \"Rent\").nameBn).to.eql(\"ভাড়া\"));",
+                  "pm.collectionVariables.set(\"rentId\", c.find((x) => x.name === \"Rent\").id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/categories?type=EXPENSE"
+          }
+        },
+        {
+          "name": "Seeded income categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"salesId\", pm.response.json().data.find((x) => x.name === \"Sales\").id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/categories?type=INCOME"
+          }
+        },
+        {
+          "name": "Create category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"categoryId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"name\": \"Internet\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/categories"
+          }
+        },
+        {
+          "name": "Update category",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameBn\": \"ইন্টারনেট\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/categories/{{categoryId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "18. Documents",
+      "item": [
+        {
+          "name": "Start upload - type not allowed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RECEIPT\",\n  \"fileName\": \"x.html\",\n  \"mime\": \"text/html\",\n  \"sizeBytes\": 10\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/uploads"
+          }
+        },
+        {
+          "name": "Start upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const u = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"documentId\", u.document.id);",
+                  "pm.collectionVariables.set(\"uploadUrl\", u.uploadUrl);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RECEIPT\",\n  \"fileName\": \"receipt.pdf\",\n  \"mime\": \"application/pdf\",\n  \"sizeBytes\": 48\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/uploads"
+          }
+        },
+        {
+          "name": "Complete before uploading",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is DOCUMENT_NOT_UPLOADED\", () => pm.expect(pm.response.json().error.code).to.eql(\"DOCUMENT_NOT_UPLOADED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/{{documentId}}/complete"
+          }
+        },
+        {
+          "name": "Upload the file to storage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/pdf"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n"
+            },
+            "url": "{{uploadUrl}}"
+          }
+        },
+        {
+          "name": "Complete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ready, with a hash\", () => { const d = pm.response.json().data; pm.expect(d.status).to.eql(\"READY\"); pm.expect(d.sha256).to.have.lengthOf(64); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/{{documentId}}/complete"
+          }
+        },
+        {
+          "name": "List documents",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one document\", () => pm.expect(pm.response.json().data.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents"
+          }
+        },
+        {
+          "name": "Download link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"signed URL\", () => pm.expect(pm.response.json().data.url).to.include(\"X-Amz-Signature\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/{{documentId}}/download"
+          }
+        }
+      ]
+    },
+    {
+      "name": "19. Transactions",
+      "item": [
+        {
+          "name": "Create expense",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"idempotencyKey\", \"postman-\" + Date.now());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"draft with a number\", () => { pm.expect(t.status).to.eql(\"DRAFT\"); pm.expect(t.number).to.eql(\"TXN-2026-000001\"); pm.expect(t.amountMinor).to.eql(\"3000000\"); });",
+                  "pm.collectionVariables.set(\"transactionId\", t.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"3000000\",\n  \"txnDate\": \"2026-11-01\",\n  \"description\": \"Rent\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Retry with the same key",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"same transaction, replayed\", () => { pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get(\"transactionId\")); pm.expect(pm.response.headers.get(\"Idempotency-Replayed\")).to.eql(\"true\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"3000000\",\n  \"txnDate\": \"2026-11-01\",\n  \"description\": \"Rent\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Same key, different body",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is IDEMPOTENCY_KEY_REUSED\", () => pm.expect(pm.response.json().error.code).to.eql(\"IDEMPOTENCY_KEY_REUSED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{idempotencyKey}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"1\",\n  \"txnDate\": \"2026-11-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Wrong category type",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is CATEGORY_TYPE_MISMATCH\", () => pm.expect(pm.response.json().error.code).to.eql(\"CATEGORY_TYPE_MISMATCH\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{salesId}}\",\n  \"amountMinor\": \"100\",\n  \"txnDate\": \"2026-11-01\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Possible duplicate is flagged",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"flagged\", () => pm.expect(t.possibleDuplicate).to.eql(true));",
+                  "pm.collectionVariables.set(\"duplicateId\", t.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"3000000\",\n  \"txnDate\": \"2026-11-02\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Dismiss the flag",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"cleared\", () => pm.expect(pm.response.json().data.possibleDuplicate).to.eql(false));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{duplicateId}}/dismiss-duplicate"
+          }
+        },
+        {
+          "name": "Transfer with a fee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"TRANSFER\",\n  \"accountId\": \"{{bankId}}\",\n  \"toAccountId\": \"{{cashId}}\",\n  \"amountMinor\": \"1000000\",\n  \"feeMinor\": \"18500\",\n  \"txnDate\": \"2026-11-03\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Transfer to the same account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is TRANSFER_ACCOUNTS_INVALID\", () => pm.expect(pm.response.json().error.code).to.eql(\"TRANSFER_ACCOUNTS_INVALID\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"TRANSFER\",\n  \"accountId\": \"{{bankId}}\",\n  \"toAccountId\": \"{{bankId}}\",\n  \"amountMinor\": \"100\",\n  \"txnDate\": \"2026-11-03\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "List with filters",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"two expenses\", () => pm.expect(pm.response.json().data.length).to.eql(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions?type=EXPENSE&from=2026-11-01&to=2026-11-30"
+          }
+        },
+        {
+          "name": "Update draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"November rent\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "Attach document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentId\": \"{{documentId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}/attachments"
+          }
+        },
+        {
+          "name": "Get with attachments",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"one attachment\", () => pm.expect(pm.response.json().data.attachments.length).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}"
+          }
+        },
+        {
+          "name": "Document in use cannot be deleted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is DOCUMENT_IN_USE\", () => pm.expect(pm.response.json().error.code).to.eql(\"DOCUMENT_IN_USE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/{{documentId}}"
+          }
+        },
+        {
+          "name": "Detach document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}/attachments/{{documentId}}"
+          }
+        },
+        {
+          "name": "Delete document",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/documents/{{documentId}}"
+          }
+        },
+        {
+          "name": "Void draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"voided\", () => pm.expect(pm.response.json().data.status).to.eql(\"VOID\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}/void"
+          }
+        },
+        {
+          "name": "Voided cannot be edited",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is TRANSACTION_NOT_EDITABLE\", () => pm.expect(pm.response.json().error.code).to.eql(\"TRANSACTION_NOT_EDITABLE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"x\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{transactionId}}"
           }
         }
       ]

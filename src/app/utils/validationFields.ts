@@ -15,6 +15,13 @@ export const newPasswordField = z
 
 export const existingPasswordField = z.string().normalize("NFC").min(1).max(1000);
 
+const SUPPORTED_CURRENCIES = new Set(Intl.supportedValuesOf("currency"));
+
+export const currencyField = z
+  .string()
+  .toUpperCase()
+  .refine((value) => SUPPORTED_CURRENCIES.has(value), { message: "UNSUPPORTED_CURRENCY" });
+
 export const totpCodeField = z
   .string()
   .overwrite(normalizeDigits)

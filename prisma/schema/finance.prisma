@@ -1,0 +1,165 @@
+enum FinancialAccountType {
+    CASH
+    BANK
+    BKASH
+    NAGAD
+    MFS_OTHER
+    CUSTOM
+}
+
+enum CategoryType {
+    INCOME
+    EXPENSE
+}
+
+enum TransactionType {
+    INCOME
+    EXPENSE
+    TRANSFER
+    REFUND
+    ADJUSTMENT
+}
+
+enum TransactionStatus {
+    DRAFT
+    PENDING_APPROVAL
+    POSTED
+    REJECTED
+    VOID
+}
+
+enum TransactionSource {
+    MANUAL
+    IMPORT
+    SYNC
+    RECURRING
+    AI
+}
+
+// Where the money lives. Phase 4 links each one to a ledger account.
+model FinancialAccount {
+    id                  String               @id @default(uuid(7)) @db.Uuid
+    workspaceId         String               @map("workspace_id") @db.Uuid
+    businessId          String               @map("business_id") @db.Uuid
+    name                String               @db.Citext
+    type                FinancialAccountType
+    currency            String               @db.Char(3)
+    openingBalanceMinor BigInt               @map("opening_balance_minor")
+    openingDate         DateTime             @map("opening_date") @db.Date
+    // A cache that Phase 4's posting engine keeps up to date. The ledger is the source of truth.
+    currentBalanceMinor BigInt               @map("current_balance_minor")
+    // Only the last 4 digits. The full number is never stored.
+    maskedNumber        String?              @map("masked_number")
+    isActive            Boolean              @default(true) @map("is_active")
+    createdBy           String               @map("created_by") @db.Uuid
+    createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business             Business      @relation(fields: [businessId], references: [id])
+    transactions         Transaction[] @relation("TransactionAccount")
+    incomingTransactions Transaction[] @relation("TransactionToAccount")
+
+    @@unique([businessId, name])
+    @@map("financial_accounts")
+}
+
+model Category {
+    id          String       @id @default(uuid(7)) @db.Uuid
+    workspaceId String       @map("workspace_id") @db.Uuid
+    businessId  String       @map("business_id") @db.Uuid
+    type        CategoryType
+    name        String       @db.Citext
+    // Set on seeded categories. User-created names are stored as typed, in any language.
+    nameBn      String?      @map("name_bn")
+    isSystem    Boolean      @default(false) @map("is_system")
+    isActive    Boolean      @default(true) @map("is_active")
+    createdBy   String       @map("created_by") @db.Uuid
+    createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business     Business      @relation(fields: [businessId], references: [id])
+    transactions Transaction[]
+
+    @@unique([businessId, type, name])
+    @@map("categories")
+}
+
+model Transaction {
+    id                String            @id @default(uuid(7)) @db.Uuid
+    workspaceId       String            @map("workspace_id") @db.Uuid
+    businessId        String            @map("business_id") @db.Uuid
+    number            String
+    type              TransactionType
+    status            TransactionStatus @default(DRAFT)
+    accountId         String            @map("account_id") @db.Uuid
+    toAccountId       String?           @map("to_account_id") @db.Uuid
+    categoryId        String?           @map("category_id") @db.Uuid
+    amountMinor       BigInt            @map("amount_minor")
+    feeMinor          BigInt            @default(0) @map("fee_minor")
+    currency          String            @db.Char(3)
+    txnDate           DateTime          @map("txn_date") @db.Date
+    paymentMethod     String?           @map("payment_method")
+    referenceNo       String?           @map("reference_no")
+    description       String?
+    source            TransactionSource @default(MANUAL)
+    // Provider's own id (Phase 7). A partial unique index in the migration blocks duplicate imports.
+    providerTxnId     String?           @map("provider_txn_id")
+    possibleDuplicate Boolean           @default(false) @map("possible_duplicate")
+    duplicateOfId     String?           @map("duplicate_of_id") @db.Uuid
+    createdBy         String            @map("created_by") @db.Uuid
+    createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business    Business                @relation(fields: [businessId], references: [id])
+    account     FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
+    toAccount   FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
+    category    Category?               @relation(fields: [categoryId], references: [id])
+    attachments TransactionAttachment[]
+
+    @@unique([businessId, number])
+    @@index([businessId, txnDate(sort: Desc), id(sort: Desc)])
+    @@index([businessId, accountId, amountMinor, txnDate])
+    @@map("transactions")
+}
+
+model TransactionAttachment {
+    transactionId String   @map("transaction_id") @db.Uuid
+    documentId    String   @map("document_id") @db.Uuid
+    workspaceId   String   @map("workspace_id") @db.Uuid
+    businessId    String   @map("business_id") @db.Uuid
+    createdBy     String   @map("created_by") @db.Uuid
+    createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    transaction Transaction @relation(fields: [transactionId], references: [id])
+    document    Document    @relation(fields: [documentId], references: [id])
+
+    @@id([transactionId, documentId])
+    @@index([businessId])
+    @@map("transaction_attachments")
+}
+
+// Hands out TXN-2026-000123 style numbers, one counter per business, name and year.
+model BusinessSequence {
+    businessId String @map("business_id") @db.Uuid
+    name       String
+    value      BigInt
+
+    business Business @relation(fields: [businessId], references: [id])
+
+    @@id([businessId, name])
+    @@map("business_sequences")
+}
+
+// A retried request with the same key gets the first response back instead of doing the work twice.
+model IdempotencyKey {
+    userId       String   @map("user_id") @db.Uuid
+    key          String
+    requestHash  String   @map("request_hash")
+    statusCode   Int      @map("status_code")
+    responseBody Json     @map("response_body")
+    expiresAt    DateTime @map("expires_at") @db.Timestamptz(3)
+    createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    @@id([userId, key])
+    @@map("idempotency_keys")
+}

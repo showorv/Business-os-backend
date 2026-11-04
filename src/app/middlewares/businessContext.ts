@@ -1,6 +1,7 @@
 import type { RequestHandler } from "express";
 import { z } from "zod";
 import { securityLogger } from "../../lib/logger.js";
+import { requireAuth } from "./auth.js";
 import type { Permission } from "../constants/permissions.js";
 import { auditService } from "../modules/audit/audit.service.js";
 import { membersService } from "../modules/members/members.service.js";
@@ -64,3 +65,7 @@ export const requireWritableBusiness: RequestHandler = (req, _res, next) => {
   }
   next();
 };
+
+// The two guard chains most business routes need.
+export const businessRead = (permission: Permission) => [requireAuth, requireMembership, requirePermission(permission)];
+export const businessWrite = (permission: Permission) => [...businessRead(permission), requireWritableBusiness];

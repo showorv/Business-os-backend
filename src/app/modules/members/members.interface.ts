@@ -8,6 +8,8 @@ export interface BusinessContext {
   workspaceId: string;
   businessId: string;
   businessStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED";
+  baseCurrency: string;
+  timezone: string;
   memberId: string;
   roleKey: RoleKey;
   permissions: string[];

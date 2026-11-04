@@ -33,7 +33,7 @@ services:
       timeout: 3s
       retries: 20
 
-  # Not used by code until Phase 3 (documents), started now per the Phase 1 deliverables.
+  # Stores uploaded documents (S3-compatible).
   # Chainguard's image: minio/minio on Docker Hub and Quay denied anonymous pulls (Nov 2026).
   minio:
     image: cgr.dev/chainguard/minio:latest
