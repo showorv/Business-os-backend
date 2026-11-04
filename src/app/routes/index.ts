@@ -19,6 +19,11 @@ import { notificationsRouter } from "../modules/notifications/notifications.rout
 import { recurringSchedulesRouter } from "../modules/recurring-schedules/recurring-schedules.router.js";
 import { remindersRouter } from "../modules/reminders/reminders.router.js";
 import { allTasksRouter, tasksRouter } from "../modules/tasks/tasks.router.js";
+import { integrationsRouter } from "../modules/integrations/integrations.router.js";
+import { statementImportsRouter } from "../modules/statement-imports/statement-imports.router.js";
+import { statementLinesRouter } from "../modules/statement-lines/statement-lines.router.js";
+import { statementRulesRouter } from "../modules/statement-rules/statement-rules.router.js";
+import { statementTemplatesRouter } from "../modules/statement-templates/statement-templates.router.js";
 import { reconciliationsRouter } from "../modules/reconciliations/reconciliations.router.js";
 import { reportExportsRouter } from "../modules/report-exports/report-exports.router.js";
 import { reportsRouter } from "../modules/reports/reports.router.js";
@@ -57,6 +62,11 @@ const moduleRoutes = [
   { path: "/businesses/:businessId/tasks", router: tasksRouter },
   { path: "/businesses/:businessId/reminders", router: remindersRouter },
   { path: "/businesses/:businessId/recurring-schedules", router: recurringSchedulesRouter },
+  { path: "/businesses/:businessId/integrations", router: integrationsRouter },
+  { path: "/businesses/:businessId/statement-templates", router: statementTemplatesRouter },
+  { path: "/businesses/:businessId/statement-imports", router: statementImportsRouter },
+  { path: "/businesses/:businessId/statement-lines", router: statementLinesRouter },
+  { path: "/businesses/:businessId/statement-rules", router: statementRulesRouter },
 ];
 
 const router = Router();

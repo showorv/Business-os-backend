@@ -4,6 +4,7 @@ enum DocumentType {
   CONTRACT
   POLICY
   NOTE
+  STATEMENT
 }
 
 enum DocumentStatus {
@@ -35,6 +36,7 @@ model Document {
   business    Business                @relation(fields: [businessId], references: [id])
   attachments TransactionAttachment[]
   taskAttachments TaskAttachment[]
+  statementImports StatementImport[]
 
   @@index([businessId, id(sort: Desc)])
   @@map("documents")

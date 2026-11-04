@@ -8,6 +8,7 @@ export const QueueName = {
   REMINDERS: "reminders",
   NOTIFICATIONS: "notifications",
   MAINTENANCE: "maintenance",
+  INTEGRATIONS: "integrations",
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -43,6 +44,11 @@ export const queues = {
   [QueueName.DOMAIN_EVENTS]: new Queue(QueueName.DOMAIN_EVENTS, { connection: queueConnection, defaultJobOptions }),
   [QueueName.REMINDERS]: new Queue(QueueName.REMINDERS, { connection: queueConnection, defaultJobOptions }),
   [QueueName.NOTIFICATIONS]: new Queue(QueueName.NOTIFICATIONS, { connection: queueConnection, defaultJobOptions }),
+  // Jitter stops many failed syncs retrying against a provider at the same moment.
+  [QueueName.INTEGRATIONS]: new Queue(QueueName.INTEGRATIONS, {
+    connection: queueConnection,
+    defaultJobOptions: { ...defaultJobOptions, backoff: { type: "exponential" as const, delay: 5000, jitter: 0.5 } },
+  }),
   // These run again on their next schedule, so a failure is not worth retrying at once.
   [QueueName.MAINTENANCE]: new Queue(QueueName.MAINTENANCE, {
     connection: queueConnection,

@@ -34,6 +34,7 @@ const DEFAULT_PREFERENCES = {
 const CHANNELS_BY_TYPE: Partial<Record<NotificationType, NotificationChannel[]>> = {
   [NotificationType.EXPORT_READY]: ["IN_APP"],
   [NotificationType.EXPORT_FAILED]: ["IN_APP"],
+  [NotificationType.STATEMENT_IMPORT_FINISHED]: ["IN_APP"],
   [NotificationType.INVITATION]: ["EMAIL"],
   [NotificationType.PASSWORD_RESET]: ["EMAIL"],
   [NotificationType.PASSWORD_CHANGED]: ["EMAIL"],

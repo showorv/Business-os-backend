@@ -11,9 +11,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | 3 | Accounts & transactions | ✅ Done |
 | 4 | Double-entry ledger | ✅ Done |
 | 5 | Analytics & reports | ✅ Done |
-| **6** | **Tasks & reminders (email, notifications)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 7 | Integrations (bKash, banks, CSV) | ⬜ Next |
-| 8 | AI & RAG | ⬜ |
+| 6 | Tasks & reminders (email, notifications) | ✅ Done |
+| **7** | **Integrations (statement import, matching)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 8 | AI & RAG | ⬜ Next |
 | 9 | Frontend | ⬜ |
 | 10 | Hardening & launch | ⬜ |
 
@@ -65,7 +65,7 @@ npm run dev
 npm run worker
 ```
 
-The worker makes report exports, checks budgets and goals, fires reminders, sends email and push, runs recurring transactions and does the nightly checks. The API runs without it, but all of that waits until it starts.
+The worker makes report exports, checks budgets and goals, fires reminders, sends email and push, runs recurring transactions, imports statements, syncs connections and does the nightly checks. The API runs without it, but all of that waits until it starts.
 
 **Step 8. Check it**
 
@@ -114,9 +114,10 @@ src/
     ├── config/            env.config.ts (validated environment)
     ├── constants/         permissions, categoryTemplates, chartOfAccounts
     ├── admin/             queueBoard (the Bull Board screen)
-    ├── jobs/              outboxRelay, deliveryRelay, processEvent, eventTypes, domainEvents, reminderJobs, overdueScan, maintenance
+    ├── jobs/              outboxRelay, deliveryRelay, processEvent, eventTypes, domainEvents, reminderJobs, overdueScan, integrationSync, maintenance
     ├── exports/           reportTable, renderPdf, renderXlsx, renderCsv
     ├── notifications/     templates (email and push wording, English and Bangla)
+    ├── integrations/      adapter (the contract), registry, sandbox.adapter, statementFile (reads CSV and Excel)
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
@@ -147,7 +148,12 @@ src/
         ├── tasks/            same five files
         ├── reminders/        same five files
         ├── recurring-schedules/  same five files
-        └── notifications/    same five files
+        ├── notifications/    same five files
+        ├── integrations/     same five files (connections, sync history, webhooks)
+        ├── statement-templates/  same five files
+        ├── statement-imports/    same five files
+        ├── statement-lines/      same five files (the matcher and review inbox)
+        └── statement-rules/      same five files
 prisma/
 ├── schema/                schema, workspace, auth, business, finance, ledger, analytics, tasks, notifications, document and audit models
 └── migrations/
@@ -210,6 +216,123 @@ requireAuth              who are you?
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 7
+
+**The goal:** get your bank, bKash and Nagad statements into the system and match them to your books, so you can see what's missing and reconcile quickly.
+
+**You don't need a merchant or API account.** The document says most Bangladeshi banks have no public API, and that merchant APIs only show payments made to your merchant account. So it treats statement files as a main path, not a fallback. Download a CSV or Excel statement from your bank or MFS, and everything here works.
+
+### How the pieces connect
+```
+CSV / Excel file ──┐
+Provider API ──────┼─> one standard line ─> skip repeats ─> statement_lines (UNMATCHED)
+Provider webhook ──┘   (later, with an account)                  │
+                                                                 ▼
+                                            1. Already in the books? Link it.
+                                            2. A rule fits? Create a transaction.
+                                            3. Otherwise: review inbox.
+                                                                 │
+                                                                 ▼
+                                                   Reconciliation clears what's matched
+```
+
+**A statement line never changes your books by itself.** It reaches the ledger only through a normal transaction, with all the usual checks. Nothing here can move money either: syncing is read-only.
+
+### Step 1. Upload and preview a statement
+1. **Upload it** the same way as other documents, with `type: "STATEMENT"`. CSV or Excel, up to 10 MB and 50,000 rows.
+2. **Preview it** with `POST /statement-imports/preview`. With no mapping, it shows the file's columns, a suggested mapping and the date formats that fit. It understands common English and Bangla headings. With a mapping, it shows exactly what would be imported, and changes nothing.
+3. **Save the mapping** as a template, so that bank's format only needs working out once.
+
+**A mapping says which column is which:**
+```json
+{ "headerRow": 3, "dateColumn": "Date", "dateFormat": "DD/MM/YYYY", "descriptionColumn": "Particulars",
+  "referenceColumn": "Ref", "debitColumn": "Withdrawal", "creditColumn": "Deposit", "balanceColumn": "Balance" }
+```
+Use `debitColumn` and `creditColumn`, or one `amountColumn`, where negative means money out. A Dr/Cr column beside it works too, through `directionColumn`.
+
+**It reads what banks really produce:** `1,25,000.50`, `৳1,000`, `(300.00)`, `500 Dr`, Bangla digits, real Excel date cells, UTF-16 files saved by Excel, and semicolon or tab separators. Amounts never pass through a float, so paisa can't drift. A date like `05/06/2026` could be read two ways, so you choose the format rather than the system guessing.
+
+### Step 2. Import it
+`POST /statement-imports` queues it, and the worker does the rest.
+
+- **The same file twice adds nothing,** and an overlapping month adds only what's new. Two identical ৳500 withdrawals on one day are both kept.
+- **One bad row doesn't stop the rest.** Rows that can't be read are reported by row number. If every row fails, the mapping is wrong, so the import is marked `FAILED`.
+- **Balances are checked.** If a row's balance doesn't follow from the one before, `balanceBreaks` counts it. That often means a page is missing from the statement. It warns rather than refuses.
+- **The original file is kept** as a document, and each import keeps its own copy of the mapping.
+
+### Step 3. The matcher
+Each new line goes through these in order. **A wrong automatic match is worse than asking,** so anything unclear waits for you.
+
+| Step | What it looks for | Result |
+|---|---|---|
+| 1. Same reference | Same amount, side and reference as a journal line on this account, within 3 days | Linked (`REFERENCE`) |
+| 2. Amount and date | Only one possibility, and either the same day or shared words in the description | Linked (`AMOUNT_DATE`) |
+| 3. Your rules | Text you chose, such as `facebook` | A draft, or posted with `autoPost` (`RULE`) |
+| Otherwise | | Stays in the review inbox |
+
+Reversed entries and journal lines already used are never matched. **An existing entry always beats a rule,** so something you already typed in isn't recorded twice.
+
+**Rules** (`/statement-rules`) are plain text, never patterns, so nobody can write one that slows the server. You can add a maximum amount and a priority. A rule that posts needs `ledger.post`, and an amount above your approval limit still waits for approval. If posting fails, for example in a closed period, the line returns to the inbox with `lastMatchError` saying why.
+
+### Step 4. The review inbox
+`GET /statement-lines?status=UNMATCHED` is your to-do list. `GET /statement-lines/:id` also suggests journal lines it might match.
+
+| Action | What it does |
+|---|---|
+| `/match` | Links existing journal lines. Several can add up to one line, such as a batched deposit |
+| `/categorize` | Creates a transaction, as a draft or posted. Or with `transferAccountId`, a transfer to your other account |
+| `/split` | Creates several transactions adding up to the line. All or nothing |
+| `/ignore`, `/restore` | Leaves a line out, or brings it back |
+| `/unmatch` | Removes the link. A transaction it created stays until you void or reverse it |
+
+**Example:** your statement shows ৳1,018.50 leaving the bank, including an ৳18.50 fee, moving to bKash. Categorizing it with `transferAccountId` posts:
+
+| Account | Dr | Cr |
+|---|---|---|
+| 1130 bKash Wallet | ৳1,000.00 | |
+| 6500 Bank & MFS Charges | ৳18.50 | |
+| City Bank | | ৳1,018.50 |
+
+An income or expense line puts the whole amount on its category, because this system records fees only on transfers. To show a fee separately on an expense, use `/split`.
+
+**The links stay true as the books change.** Posting a draft settles its line. Voiding a draft, or reversing a matched transaction, sends the line back to the inbox. This runs after each posting, and every 15 minutes.
+
+### Step 5. Reconciliation is now much faster
+1. `POST /reconciliations` with the statement's closing balance. `GET` shows `latestStatementBalance` from your import, and `openStatementLines` still to settle.
+2. `POST /reconciliations/:id/apply-statement-matches` clears everything already matched, in one call.
+3. Close at zero, as before. A line that's part of a reconciliation can't be unmatched.
+
+### Step 6. Connecting a provider, when you have an account
+This is built and tested, but **there are no live providers yet**, because there are no credentials to build against.
+
+- **Adding one:** write one adapter file implementing `src/app/integrations/adapter.ts`, and add one line to `registry.ts`. The finance code doesn't change. Each adapter says what it can do, such as `paymentsInOnly`.
+- **The practice bank:** the `sandbox` provider runs the whole path with made-up data, so you can try it now in Postman. It's never available in production. Setting `mode` to `revoked`, `flaky` or `broken` makes it fail on purpose.
+- **Syncing:** the worker checks every 15 minutes for connections that are due, or use **Sync now**. Only one sync runs per connection at a time. Lines and the cursor save together, so a crash resumes with no gap and no repeats.
+- **When it fails:**
+
+| Failure | What happens |
+|---|---|
+| Timeout, 5xx or 429 | Retries up to 5 times with growing, randomised delays. After that the job stays in the failed list (the dead-letter queue) and goes to Sentry |
+| 401 or revoked | Stops at once, sets `NEEDS_REAUTH`, tells the managers. Only new credentials restart it |
+| A bad request | Stops at once, with no retry |
+| 3 failures in a row | Alerts the managers |
+
+- **Secrets:** encrypted with a key unique to each workspace, and tied to that connection. They're never returned by the API. Passwords, PINs and OTPs are refused, because each adapter accepts only its own named fields.
+- **Webhooks:** `POST /webhooks/integrations/:connectionId` checks the provider's signature and timestamp against the exact bytes sent, saves the call and answers quickly. A webhook only triggers a sync, so even a forged one couldn't add a statement line.
+- **Raw data:** what a provider sends is stored for 30 days to help investigate problems, with secrets removed and phone and account numbers masked.
+- **History:** `GET /integrations/connections/:id/sync-runs`, and every connection change is in the audit log.
+
+### Who can do what
+| Action | Permission |
+|---|---|
+| Import statements, review lines, templates, rules | `finance.write` (Owner, Admin, Accountant) |
+| Rules with `autoPost`, and `postNow` | Also `ledger.post` |
+| Reading lines and imports | `finance.read` |
+| Connections, secrets and syncing | `integrations.manage` (Owner, Admin) |
+
+### Trying it
+Download a real statement from your bank as CSV, then follow Postman folders 37 and 38. Folder 39 uses the practice bank. Please send me the column headings of your bank's file if the suggested mapping gets them wrong, without any account numbers or amounts.
 
 ## What was built in Phase 6
 
@@ -902,6 +1025,28 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | GET | `/notifications/push/config` | Bearer | Whether push is on, and its public key |
 | GET / POST | `/notifications/push/subscriptions` | Bearer | This browser's push subscription |
 | DELETE | `/notifications/push/subscriptions/:id` | Bearer | Stop push to a browser |
+| POST | `/businesses/:businessId/statement-imports/preview` | `finance.write` | See columns, a suggested mapping and the result |
+| GET / POST | `.../statement-imports` | `finance.read` / `finance.write` | List or import |
+| GET | `.../statement-imports/:importId` | `finance.read` | Status, counts and row errors |
+| GET / POST | `.../statement-templates` | `finance.read` / `finance.write` | Saved column mappings |
+| PATCH / DELETE | `.../statement-templates/:templateId` | `finance.write` | Change or remove |
+| GET | `.../statement-lines` | `finance.read` | The review inbox (`status=UNMATCHED`) |
+| GET | `.../statement-lines/summary` | `finance.read` | Counts by status |
+| POST | `.../statement-lines/run-matcher` | `finance.write` | Try matching open lines again |
+| GET | `.../statement-lines/:lineId` | `finance.read` | A line, its links and suggestions |
+| POST | `.../statement-lines/:lineId/match`, `/unmatch` | `finance.write` | Link to journal lines, or undo |
+| POST | `.../statement-lines/:lineId/categorize`, `/split` | `finance.write` | Create transactions from it |
+| POST | `.../statement-lines/:lineId/ignore`, `/restore` | `finance.write` | Leave out, or bring back |
+| GET / POST | `.../statement-rules` | `finance.read` / `finance.write` | Rules for categorizing by text |
+| PATCH / DELETE | `.../statement-rules/:ruleId` | `finance.write` | Change or remove |
+| GET | `.../integrations/providers` | `integrations.manage` | What can be connected |
+| GET / POST | `.../integrations/connections` | `integrations.manage` | List or connect (recent MFA) |
+| GET / PATCH | `.../integrations/connections/:connectionId` | `integrations.manage` | Read, disable, change how often |
+| POST | `.../connections/:connectionId/reauthorize` | `integrations.manage` | New credentials (recent MFA) |
+| POST | `.../connections/:connectionId/sync` | `integrations.manage` | Sync now |
+| GET | `.../connections/:connectionId/sync-runs` | `integrations.manage` | Sync history |
+| POST | `/webhooks/integrations/:connectionId` | Provider's signature | Called by a provider |
+| POST | `.../reconciliations/:reconciliationId/apply-statement-matches` | `ledger.post` | Clear everything already matched |
 | GET / POST | `/businesses/:businessId/reconciliations` | `finance.read` / `ledger.post` | List or start |
 | GET | `.../reconciliations/:reconciliationId` | `finance.read` | Difference and unmatched lines |
 | POST | `.../reconciliations/:reconciliationId/lines` | `ledger.post` | Match lines |
@@ -937,13 +1082,21 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 npm run test:postman
 ```
 
-Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. A run registers 7 times and sign-ups are limited to 10 per 10 minutes, so a second run soon after gets `429`. On local Docker Redis you can clear the limits with:
+The last folder pauses for a minute, because the collection reaches the API's limit of 300 requests a minute. Folder 39 uses the practice bank, so it fails against a production build. Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. A run registers 7 times and sign-ups are limited to 10 per 10 minutes, so a second run soon after gets `429`. On local Docker Redis you can clear the limits with:
 
 ```bash
 docker exec business_os_redis redis-cli flushall
 ```
 
 ## How it was verified
+
+**Phase 7:**
+- **606 integration tests pass** (144 of them new), with real uploads to MinIO. They cover amounts and dates in the formats banks use, Excel and UTF-16 files, repeated and overlapping imports, each matching step and when it must not match, three people acting on one line at once, closed periods and reversals.
+- **The real API and worker were run together:** all 316 Postman requests pass with 500 assertions, reaching all 161 documented operations, and no jobs failed.
+- **A real BullMQ worker** retried a failing sync and left it in the failed list.
+- **As a role like Neon's owner:** the whole suite passes, on a database upgraded from Phase 6's tables. The migration only adds tables and one document type, so it doesn't change existing rows.
+- **The protections were proven real:** switching off RLS on `statement_lines` or `integration_connections`, or removing the unique rule on statement rows, makes the matching tests fail. Removing the rule that a journal line settles only one statement line didn't at first, because the code checks too, so a test now checks the database rule directly.
+- **The tests caught a real accounting mistake of mine:** I had assumed fees post on every transaction. They only post on transfers, and a transfer's fee creates two lines on the account, so linking just one would have thrown off reconciliation. Fixed and tested.
 
 **Phase 6:**
 - **462 integration tests pass** (137 of them new).
@@ -993,7 +1146,9 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The Phase 5 and 6 migrations have not been run on Neon** (PostgreSQL 18). They were tested on PostgreSQL 17. Phases 2, 3 and 4's migrations did work on Neon.
+- **A real bank or MFS statement.** Tests use formats I wrote from what banks commonly produce, so your bank's file may need a mapping adjustment.
+- **Any live provider,** because there are no credentials. The sandbox proves the pipeline, not a real bank's API.
+- **The Phase 7 migration has not been run on Neon** (PostgreSQL 18). Phases 2 to 6 have been, as far as your database shows. It was tested on PostgreSQL 17.
 - **Phase 5 and 6's timing on Neon** hasn't been measured. Posting adds one query for the outbox event, on top of the 8.3 seconds measured in Phase 4.
 - **The worker's use of Neon** hasn't been measured. It checks the database every 2 seconds, which will probably stop Neon scaling to zero and can use up compute hours.
 - **A real email provider** hasn't been tried, only Mailpit. Real deliverability (spam folders, DKIM) depends on your provider.
@@ -1006,7 +1161,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. When last checked, Neon had the Phase 4 tables and `db:provision` hadn't been run, so your existing business can't post until it is.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`.
 2. **Keep the worker running.** Reminders, emails and recurring transactions all depend on it.
 3. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
 4. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
@@ -1031,6 +1186,10 @@ docker exec business_os_redis redis-cli flushall
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
 | Progressive login delay | Fixed lockout after 5 failures | Simpler, and it covers the same threat |
+| Keys held in a KMS or Vault | One key per workspace, derived from your master key | Needs no extra service. Moving to a KMS later changes only `crypto.ts` |
+| Auto-post "per business setting" | Set on each rule | Some rules are safe to post and some aren't, so one business-wide switch is too blunt |
+| One hash on date, amount, reference and balance | The same, plus a counter for repeats | Otherwise two identical withdrawals on one day would become one |
+| Counterparty matched to a counterparty record | Matched on words in the description | Counterparties aren't in any phase's list yet |
 | MJML email templates, one file per language | One TypeScript file with both languages | Email wording is short, and this adds no build step. Easy to change if emails get more complex |
 | Task status `TODO → IN_PROGRESS → DONE` | Also `TODO → DONE`, and reopening | Small tasks often skip a step, and mistakes need undoing |
 | "Mark overdue" on the task | `isOverdue` worked out when read | A stored flag would go stale between scans |
@@ -1042,7 +1201,7 @@ docker exec business_os_redis redis-cli flushall
 | Foreign-currency accounts inside a business | When needed | **Moved from Phase 5.** Accounts in another currency can exist, but posting returns `FOREIGN_CURRENCY_NOT_SUPPORTED`. A business in USD works, and consolidation converts it. Doing this properly needs exchange gains and losses, which no phase covers |
 | Fetching exchange rates automatically | When needed | You type them in, which keeps every figure traceable |
 | Exports of the consolidated view | When needed | The document's exports are per business |
-| Statement lines, importing and auto-matching | 7 | Reconciliation works by hand until then |
+| Live bank, bKash and Nagad adapters | When you have credentials | The document builds these only where credentials exist. Adding one touches one file and one line |
 | Reminders from bills' due dates and from documents | Future, 8 | Bills don't exist yet, and reading deadlines from documents needs Phase 8's ingestion |
 | Salary withholding, employees, payslips | Future | The document's Payroll module. Salary schedules post the gross amount for now |
 | Custom notification choices per type | When needed | Preferences are per channel. The document only asks for channels and quiet hours |
@@ -1061,6 +1220,6 @@ docker exec business_os_redis redis-cli flushall
 
 **Known gap:** the Phase 6 stream authenticates once when it opens. A session revoked during those 15 minutes keeps receiving until the token's life ends.
 
-## Before Phase 7
+## Before Phase 8
 
-Phase 7 adds integrations: an adapter for each provider, CSV and Excel import with mapping templates, sync history with retries, and automatic matching for reconciliation. It needs one answer from you: **which bank or MFS accounts do you actually have merchant or API access for?** That decides the first live adapter. If you have none yet, CSV and Excel import still work and can be built first.
+Phase 8 adds the AI assistant: read-only tools for answering questions about your figures, search across your documents with OCR and embeddings, and proposals you confirm before anything is written. It needs answers from you: **which LLM and embedding provider, and are you comfortable sending financial summaries to it, or should sensitive fields be masked?**

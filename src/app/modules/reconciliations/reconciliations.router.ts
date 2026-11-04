@@ -20,6 +20,7 @@ router.post(
   validate({ params, body: reconciliationsValidation.matchLines }),
   reconciliationsController.matchLines,
 );
+router.post("/:reconciliationId/apply-statement-matches", canWrite, validate({ params }), reconciliationsController.applyStatementMatches);
 router.delete(
   "/:reconciliationId/lines/:journalLineId",
   canWrite,

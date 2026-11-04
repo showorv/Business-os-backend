@@ -7,6 +7,7 @@ import { relayOutbox } from "./app/jobs/outboxRelay.js";
 import { processEvent } from "./app/jobs/processEvent.js";
 import { fireReminder, type ReminderJob } from "./app/jobs/reminderJobs.js";
 import { notificationsService } from "./app/modules/notifications/notifications.service.js";
+import { statementImportsService } from "./app/modules/statement-imports/statement-imports.service.js";
 import { reportExportsService } from "./app/modules/report-exports/report-exports.service.js";
 import { shutdownTelemetry } from "./instrument.js";
 import { logger } from "./lib/logger.js";
@@ -32,6 +33,8 @@ const workers = [
     connection: queueConnection,
     concurrency: 5,
   }),
+  // Provider limits are per connection, and a claim stops one connection syncing twice at once.
+  new Worker<EventJob>(QueueName.INTEGRATIONS, (job) => processEvent(job.data), { connection: queueConnection, concurrency: 3 }),
   // One at a time, so a long nightly check can't overlap with itself.
   new Worker(QueueName.MAINTENANCE, (job) => runMaintenanceJob(job.name), { connection: queueConnection, concurrency: 1 }),
 ];
@@ -48,6 +51,7 @@ for (const worker of workers) {
       void reportExportsService.markFailed(job.data.payload.exportId);
     }
     if (worker.name === QueueName.NOTIFICATIONS) void notificationsService.markDeliveryFailed(job.data.deliveryId);
+    if (worker.name === QueueName.INTEGRATIONS && job.data.payload.importId) void statementImportsService.markFailed(job.data.payload.importId);
   });
 }
 

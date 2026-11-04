@@ -77,3 +77,12 @@ export const putObject = (key: string, body: Uint8Array, contentType: string) =>
   client.send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: body, ContentType: contentType }));
 
 export const deleteObject = (key: string) => client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+
+// For files the server has to read whole, such as an uploaded statement.
+export const readObjectBytes = async (key: string) => {
+  const stream = await openObjectStream(key);
+  if (!stream) return null;
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  return Buffer.concat(chunks);
+};

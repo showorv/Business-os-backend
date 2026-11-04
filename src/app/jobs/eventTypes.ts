@@ -21,4 +21,6 @@ export const EVENT_ROUTES: Partial<Record<EventType, QueueName>> = {
   [EventType.TASK_COMMENTED]: QueueName.DOMAIN_EVENTS,
   [EventType.REMINDER_CHANGED]: QueueName.DOMAIN_EVENTS,
   [EventType.INVITATION_CREATED]: QueueName.DOMAIN_EVENTS,
+  [EventType.STATEMENT_IMPORT_REQUESTED]: QueueName.INTEGRATIONS,
+  [EventType.INTEGRATION_SYNC_REQUESTED]: QueueName.INTEGRATIONS,
 };

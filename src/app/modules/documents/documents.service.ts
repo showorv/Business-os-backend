@@ -9,6 +9,7 @@ import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import type { ICreateUploadBody, IListDocumentsQuery, UploadProblem } from "./documents.interface.js";
+import { CSV_MIME } from "./documents.validation.js";
 
 const SNIFF_BYTES = 4100;
 
@@ -55,6 +56,13 @@ const createUpload = async (business: BusinessContext, body: ICreateUploadBody) 
   return { document, ...(await createUploadUrl(storageKey, body.mime, body.sizeBytes)) };
 };
 
+const UTF16_BOMS = ["fffe", "feff"];
+
+const isPlainText = (start: Buffer, detectedMime: string | undefined) => {
+  if (detectedMime) return false;
+  return UTF16_BOMS.includes(start.subarray(0, 2).toString("hex")) || !start.includes(0);
+};
+
 // Reads the stored file itself, because the client's claims about it can't be trusted.
 const inspectUpload = async (storageKey: string, declaredMime: string, declaredSize: bigint) => {
   const stream = await openObjectStream(storageKey);
@@ -73,7 +81,9 @@ const inspectUpload = async (storageKey: string, declaredMime: string, declaredS
   if (size !== declaredSize) return { problem: "SIZE_MISMATCH" as UploadProblem };
 
   const detected = await fileTypeFromBuffer(start);
-  if (detected?.mime !== declaredMime) return { problem: "TYPE_MISMATCH" as UploadProblem };
+  // CSV has no signature to check, so it just mustn't look like some other kind of file.
+  const typeFits = declaredMime === CSV_MIME ? isPlainText(start, detected?.mime) : detected?.mime === declaredMime;
+  if (!typeFits) return { problem: "TYPE_MISMATCH" as UploadProblem };
 
   return { sha256: hash.digest("hex") };
 };

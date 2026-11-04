@@ -47,4 +47,10 @@ const close: RequestHandler = async (req, res) => {
   sendResponse(res, 200, await reconciliationsService.close(req.business!, reconciliationId, adjust, getRequestContext(req)));
 };
 
-export const reconciliationsController = { create, list, getOne, matchLines, unmatchLine, close };
+const applyStatementMatches: RequestHandler = async (req, res) => {
+  const { reconciliationId } = req.validated.params as IReconciliationParams;
+  sendResponse(res, 200, await reconciliationsService.applyStatementMatches(req.business!, reconciliationId));
+};
+
+export const reconciliationsController = {
+  applyStatementMatches, create, list, getOne, matchLines, unmatchLine, close };

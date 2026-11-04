@@ -115,6 +115,21 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
     en: { subject: "Audit log check failed", body: "The nightly check found that the audit log may have been changed. Please look into this now." },
     bn: { subject: "অডিট লগ পরীক্ষা ব্যর্থ", body: "রাতের পরীক্ষায় দেখা গেছে অডিট লগ বদলানো হয়ে থাকতে পারে। এখনই এটি দেখে নিন।" },
   }),
+  "statement_import.finished": (f) => ({
+    en: { subject: "Your statement was imported", body: `${f.count("newLines")} new lines were added, and ${f.count("needsReview")} need your review.` },
+    bn: { subject: "আপনার স্টেটমেন্ট ইমপোর্ট হয়েছে", body: `${f.count("newLines")}টি নতুন লাইন যোগ হয়েছে, এবং ${f.count("needsReview")}টি আপনার দেখা দরকার।` },
+    path: "/statement-lines",
+  }),
+  "integration.needs_reauth": (f) => ({
+    en: { subject: `Reconnect ${f.text("provider")}`, body: `${f.text("provider")} stopped accepting our sign-in, so syncing has paused. Please enter its credentials again.` },
+    bn: { subject: `${f.text("provider")} আবার সংযুক্ত করুন`, body: `${f.text("provider")} আমাদের সাইন ইন নিচ্ছে না, তাই সিঙ্ক বন্ধ আছে। দয়া করে আবার তথ্য দিন।` },
+    path: "/integrations",
+  }),
+  "integration.sync_failing": (f) => ({
+    en: { subject: `${f.text("provider")} keeps failing to sync`, body: `${f.count("failures")} syncs in a row have failed. Statement lines may be out of date.` },
+    bn: { subject: `${f.text("provider")} সিঙ্ক বারবার ব্যর্থ`, body: `পরপর ${f.count("failures")}টি সিঙ্ক ব্যর্থ হয়েছে। স্টেটমেন্টের তথ্য পুরনো হতে পারে।` },
+    path: "/integrations",
+  }),
   invitation: (f) => ({
     en: { subject: `You're invited to ${f.text("businessName")}`, body: `${f.text("inviterName")} invited you to join ${f.text("businessName")}. This link lasts 7 days.` },
     bn: { subject: `${f.text("businessName")} এ আমন্ত্রণ`, body: `${f.text("inviterName")} আপনাকে ${f.text("businessName")} এ যোগ দিতে আমন্ত্রণ জানিয়েছেন। এই লিংক ৭ দিন কাজ করবে।` },

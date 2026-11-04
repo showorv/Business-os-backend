@@ -72,6 +72,10 @@ const TOKEN = "{{financeToken}}";
 const lineCodes = `pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor]))`;
 const creds = (password = "{{password}}") => ({ email: "{{email}}", password });
 
+// A small bank statement, with Bangla in it. Its size is in bytes, because Bangla takes more than one each.
+const STATEMENT = "Date,Details,Ref,Debit,Credit,Balance\n01/12/2026,FACEBOOK ADS,FB-1,1500.00,,\n02/12/2026,বিদ্যুৎ বিল,DESCO-1,850.00,,\n03/12/2026,ATM,,500.00,,\n03/12/2026,ATM,,500.00,,\n04/12/2026,Customer deposit,,,2000.00,\n";
+const MAPPING = { dateColumn: "Date", dateFormat: "DD/MM/YYYY", descriptionColumn: "Details", referenceColumn: "Ref", debitColumn: "Debit", creditColumn: "Credit", balanceColumn: "Balance" };
+
 // A real, minimal PDF for the upload requests. Its length must equal sizeBytes.
 const PDF = "%PDF-1.4\n1 0 obj\n<<>>\nendobj\ntrailer\n<<>>\n%%EOF\n";
 
@@ -522,6 +526,77 @@ else if (items[0]) pm.collectionVariables.set("notificationId", items[0].id);`] 
   { name: "36. Forgotten password", item: [
     req("An unknown email looks the same", "POST", `${A}/password/forgot`, { body: { email: "nobody@example.com" }, tests: [status(202)] }),
     req("A made-up link is refused", "POST", `${A}/password/reset`, { body: { token: "made-up", password: "postman-new-password-2" }, tests: [status(400), errCode("PASSWORD_RESET_INVALID")] }),
+  ]},
+  { name: "37. Statement import", item: [
+    req("A rule for Facebook ads", "POST", `${FIN}/statement-rules`, { auth: TOKEN, body: { name: "Ads", containsText: "facebook", direction: "OUT", categoryId: "{{rentId}}", autoPost: true }, tests: [status(201), `pm.collectionVariables.set("ruleId", pm.response.json().data.id);`] }),
+    req("A rule's category must fit", "POST", `${FIN}/statement-rules`, { auth: TOKEN, body: { name: "Bad", containsText: "x", direction: "OUT", categoryId: "{{salesId}}" }, tests: [status(422), errCode("RULE_CATEGORY_MISMATCH")] }),
+    req("List rules", "GET", `${FIN}/statement-rules`, { auth: TOKEN, tests: [status(200), `pm.test("one rule", () => pm.expect(pm.response.json().data.length).to.eql(1));`] }),
+    req("Change a rule", "PATCH", `${FIN}/statement-rules/{{ruleId}}`, { auth: TOKEN, body: { priority: 5 }, tests: [status(200)] }),
+    req("Start uploading a statement", "POST", `${FIN}/documents/uploads`, { auth: TOKEN, body: { type: "STATEMENT", fileName: "city-bank.csv", mime: "text/csv", sizeBytes: Buffer.byteLength(STATEMENT) }, tests: [status(201), `const u = pm.response.json().data;
+pm.collectionVariables.set("statementUrl", u.uploadUrl);
+pm.collectionVariables.set("statementId", u.document.id);`] }),
+    req("A spreadsheet must be a statement", "POST", `${FIN}/documents/uploads`, { auth: TOKEN, body: { type: "RECEIPT", fileName: "x.csv", mime: "text/csv", sizeBytes: 10 }, tests: [status(422)] }),
+    req("Upload the file", "PUT", "{{statementUrl}}", { raw: STATEMENT, contentType: "text/csv", tests: [status(200)] }),
+    req("Finish the upload", "POST", `${FIN}/documents/{{statementId}}/complete`, { auth: TOKEN, tests: [status(200)] }),
+    req("See its columns", "POST", `${FIN}/statement-imports/preview`, { auth: TOKEN, body: { documentId: "{{statementId}}", financialAccountId: "{{bankId}}" }, tests: [status(200), `const d = pm.response.json().data;
+pm.test("suggests the mapping", () => { pm.expect(d.suggestion.debitColumn).to.eql("Debit"); pm.expect(d.dateFormats).to.include("DD/MM/YYYY"); });`] }),
+    req("Preview with a mapping", "POST", `${FIN}/statement-imports/preview`, { auth: TOKEN, body: { documentId: "{{statementId}}", financialAccountId: "{{bankId}}", mapping: MAPPING }, tests: [status(200), `const r = pm.response.json().data.result;
+pm.test("reads every row", () => { pm.expect(r.readableRows).to.eql(5); pm.expect(r.failedRows).to.eql(0); pm.expect(r.lines[1].description).to.eql("বিদ্যুৎ বিল"); });`] }),
+    req("A column that isn't there", "POST", `${FIN}/statement-imports/preview`, { auth: TOKEN, body: { documentId: "{{statementId}}", financialAccountId: "{{bankId}}", mapping: { ...MAPPING, creditColumn: "Deposit" } }, tests: [status(422), errCode("STATEMENT_COLUMN_MISSING")] }),
+    req("Save it as a template", "POST", `${FIN}/statement-templates`, { auth: TOKEN, body: { name: "City Bank", mapping: MAPPING }, tests: [status(201), `pm.collectionVariables.set("templateId", pm.response.json().data.id);`] }),
+    req("List templates", "GET", `${FIN}/statement-templates`, { auth: TOKEN, tests: [status(200)] }),
+    req("Change a template", "PATCH", `${FIN}/statement-templates/{{templateId}}`, { auth: TOKEN, body: { name: "City Bank current" }, tests: [status(200)] }),
+    req("Import it", "POST", `${FIN}/statement-imports`, { auth: TOKEN, body: { documentId: "{{statementId}}", financialAccountId: "{{bankId}}", templateId: "{{templateId}}" }, tests: [status(202), `pm.collectionVariables.set("importId", pm.response.json().data.id);`] }),
+    req("Remove the template", "DELETE", `${FIN}/statement-templates/{{templateId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Wait for the worker", "GET", `${FIN}/statement-imports/{{importId}}`, { auth: TOKEN, pre: `setTimeout(() => {}, 6000);`, tests: [status(200), `const i = pm.response.json().data;
+pm.test("finished, or no worker running", () => pm.expect(["QUEUED", "RUNNING", "COMPLETED"]).to.include(i.status));
+if (i.status === "COMPLETED") pm.test("adds all five, including both ATM rows", () => pm.expect(i.newLines).to.eql(5));`] }),
+    req("List imports", "GET", `${FIN}/statement-imports`, { auth: TOKEN, tests: [status(200)] }),
+  ]},
+  { name: "38. Statement lines (the review inbox)", item: [
+    req("Counts", "GET", `${FIN}/statement-lines/summary?financialAccountId={{bankId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("What needs review", "GET", `${FIN}/statement-lines?status=UNMATCHED&financialAccountId={{bankId}}`, { auth: TOKEN, tests: [status(200), `const items = pm.response.json().data.items;
+const find = (text) => items.find((l) => l.description === text);
+if (find("বিদ্যুৎ বিল")) pm.collectionVariables.set("lineToCategorize", find("বিদ্যুৎ বিল").id);
+const atm = items.filter((l) => l.description === "ATM");
+if (atm[0]) pm.collectionVariables.set("lineToSplit", atm[0].id);
+if (atm[1]) pm.collectionVariables.set("lineToIgnore", atm[1].id);
+if (find("Customer deposit")) pm.collectionVariables.set("lineToMatch", find("Customer deposit").id);
+pm.test("a rule already handled the Facebook line, if the worker ran", () => pm.expect(items.some((l) => l.description === "FACEBOOK ADS")).to.eql(false));`] }),
+    req("Details and suggestions", "GET", `${FIN}/statement-lines/{{lineToCategorize}}`, { auth: TOKEN, tests: [status(200), `pm.test("says what it might match", () => pm.expect(pm.response.json().data.suggestions).to.be.an("array"));`] }),
+    req("Categorize", "POST", `${FIN}/statement-lines/{{lineToCategorize}}/categorize`, { auth: TOKEN, body: { categoryId: "{{rentId}}", postNow: true }, tests: [status(200), `pm.test("settled", () => pm.expect(pm.response.json().data.status).to.eql("MATCHED"));`] }),
+    req("It can't be done twice", "POST", `${FIN}/statement-lines/{{lineToCategorize}}/categorize`, { auth: TOKEN, body: { categoryId: "{{rentId}}" }, tests: [status(409), errCode("STATEMENT_LINE_NOT_OPEN")] }),
+    req("Undo the link", "POST", `${FIN}/statement-lines/{{lineToCategorize}}/unmatch`, { auth: TOKEN, tests: [status(200)] }),
+    req("A split must add up", "POST", `${FIN}/statement-lines/{{lineToSplit}}/split`, { auth: TOKEN, body: { parts: [{ categoryId: "{{rentId}}", amountMinor: "100" }, { categoryId: "{{rentId}}", amountMinor: "100" }] }, tests: [status(422), errCode("SPLIT_TOTAL_MISMATCH")] }),
+    req("Split it", "POST", `${FIN}/statement-lines/{{lineToSplit}}/split`, { auth: TOKEN, body: { parts: [{ categoryId: "{{rentId}}", amountMinor: "30000" }, { categoryId: "{{rentId}}", amountMinor: "20000" }], postNow: true }, tests: [status(200), `pm.test("two transactions", () => pm.expect(pm.response.json().data.transactionIds.length).to.eql(2));`] }),
+    req("Ignore one", "POST", `${FIN}/statement-lines/{{lineToIgnore}}/ignore`, { auth: TOKEN, tests: [status(200)] }),
+    req("Bring it back", "POST", `${FIN}/statement-lines/{{lineToIgnore}}/restore`, { auth: TOKEN, tests: [status(200)] }),
+    req("An entry for the deposit", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "INCOME", accountId: "{{bankId}}", categoryId: "{{salesId}}", amountMinor: "200000", txnDate: "2026-12-04", postNow: true }, tests: [status(201), `pm.collectionVariables.set("depositEntryId", pm.response.json().data.journalEntryId);`] }),
+    req("Find its journal line", "GET", `${FIN}/journals/{{depositEntryId}}`, { auth: TOKEN, tests: [status(200), `pm.collectionVariables.set("depositLineId", pm.response.json().data.lines.find((l) => l.debitMinor === "200000").id);`] }),
+    req("A journal line that doesn't add up", "POST", `${FIN}/statement-lines/{{lineToIgnore}}/match`, { auth: TOKEN, body: { journalLineIds: ["{{depositLineId}}"] }, tests: [status(422)] }),
+    req("Run the matcher", "POST", `${FIN}/statement-lines/run-matcher`, { auth: TOKEN, body: { financialAccountId: "{{bankId}}" }, tests: [status(200)] }),
+    req("The deposit matched itself", "GET", `${FIN}/statement-lines/{{lineToMatch}}`, { auth: TOKEN, tests: [status(200), `pm.test("matched", () => pm.expect(pm.response.json().data.status).to.eql("MATCHED"));`] }),
+    req("Start a reconciliation", "POST", `${FIN}/reconciliations`, { auth: TOKEN, body: { financialAccountId: "{{bankId}}", statementDate: "2026-12-31", statementBalanceMinor: "0" }, tests: [`pm.test("started", () => pm.expect([201, 409]).to.include(pm.response.code));`, `if (pm.response.code === 201) pm.collectionVariables.set("statementRecId", pm.response.json().data.id);`] }),
+    req("Clear what's matched", "POST", `${FIN}/reconciliations/{{statementRecId}}/apply-statement-matches`, { auth: TOKEN, tests: [status(200), `pm.test("cleared some", () => pm.expect(pm.response.json().data.applied).to.be.greaterThan(0));`] }),
+    req("It shows what's left", "GET", `${FIN}/reconciliations/{{statementRecId}}`, { auth: TOKEN, tests: [status(200), `pm.test("counts open lines", () => pm.expect(pm.response.json().data.openStatementLines).to.be.a("number"));`] }),
+    req("Remove a rule", "DELETE", `${FIN}/statement-rules/{{ruleId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Outsider gets 404", "GET", `${FIN}/statement-lines`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "39. Connections (with the practice bank)", item: [
+    req("Available providers (pauses a minute, for the rate limit)", "GET", `${FIN}/integrations/providers`, { auth: TOKEN, pre: `setTimeout(() => {}, 61000);`, tests: [status(200), `pm.test("sandbox outside production", () => pm.expect(pm.response.json().data.map((p) => p.key)).to.include("sandbox"));`] }),
+    req("An unknown provider", "POST", `${FIN}/integrations/connections`, { auth: TOKEN, body: { provider: "bkash", financialAccountId: "{{bankId}}", secrets: {} }, tests: [status(422), errCode("PROVIDER_NOT_AVAILABLE")] }),
+    req("A password is refused", "POST", `${FIN}/integrations/connections`, { auth: TOKEN, body: { provider: "sandbox", financialAccountId: "{{secondAccountId}}", secrets: { apiKey: "k", password: "my-bank-password" } }, pre: `pm.collectionVariables.set("secondAccountId", pm.collectionVariables.get("bankId"));`, tests: [status(422), errCode("INTEGRATION_SECRETS_INVALID"), `pm.test("doesn't repeat it", () => pm.expect(pm.response.text()).to.not.include("my-bank-password"));`] }),
+    req("Connect", "POST", `${FIN}/integrations/connections`, { auth: TOKEN, body: { provider: "sandbox", financialAccountId: "{{secondAccountId}}", secrets: { apiKey: "practice-key" }, syncEveryHours: 12 }, tests: [status(201), `pm.test("no secrets returned", () => pm.expect(pm.response.text()).to.not.include("practice-key"));`, `pm.collectionVariables.set("connectionId", pm.response.json().data.id);`] }),
+    req("One per account and provider", "POST", `${FIN}/integrations/connections`, { auth: TOKEN, body: { provider: "sandbox", financialAccountId: "{{secondAccountId}}", secrets: { apiKey: "k" } }, tests: [status(409), errCode("CONNECTION_ALREADY_EXISTS")] }),
+    req("List connections", "GET", `${FIN}/integrations/connections`, { auth: TOKEN, tests: [status(200)] }),
+    req("Sync now", "POST", `${FIN}/integrations/connections/{{connectionId}}/sync`, { auth: TOKEN, tests: [status(202)] }),
+    req("Wait, then read it", "GET", `${FIN}/integrations/connections/{{connectionId}}`, { auth: TOKEN, pre: `setTimeout(() => {}, 5000);`, tests: [status(200)] }),
+    req("Sync history", "GET", `${FIN}/integrations/connections/{{connectionId}}/sync-runs`, { auth: TOKEN, tests: [status(200)] }),
+    req("New credentials", "POST", `${FIN}/integrations/connections/{{connectionId}}/reauthorize`, { auth: TOKEN, body: { secrets: { apiKey: "new-practice-key" } }, tests: [status(200)] }),
+    req("Disable it", "PATCH", `${FIN}/integrations/connections/{{connectionId}}`, { auth: TOKEN, body: { status: "DISABLED" }, tests: [status(200)] }),
+    req("A disabled one won't sync", "POST", `${FIN}/integrations/connections/{{connectionId}}/sync`, { auth: TOKEN, tests: [status(409), errCode("CONNECTION_NOT_ACTIVE")] }),
+    req("A webhook with no signature", "POST", "/api/v1/webhooks/integrations/{{connectionId}}", { body: { event: "payment" }, tests: [status(401)] }),
+    req("An accountant can't manage connections", "GET", `${FIN}/integrations/connections`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
   ]},
 ];
 

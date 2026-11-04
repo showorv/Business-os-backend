@@ -318,3 +318,14 @@ describe("tasks, reminders and schedules stay inside their business", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("statement tables stay inside their business", () => {
+  it("a row can't be written into another business", async () => {
+    const { bob, aliceBiz, bobBiz } = await twoBusinesses();
+    await expect(
+      withRls({ userId: bob.userId, workspaceId: bobBiz.workspaceId, businessIds: [bobBiz.id] }, (tx) =>
+        tx.statementTemplate.create({ data: { workspaceId: aliceBiz.workspaceId, businessId: aliceBiz.id, name: "x", mapping: {}, createdBy: bob.userId } }),
+      ),
+    ).rejects.toThrow();
+  });
+});

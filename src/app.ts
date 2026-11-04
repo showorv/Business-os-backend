@@ -9,6 +9,7 @@ import { errorHandler, notFound } from "./app/middlewares/errorHandler.js";
 import { rateLimit } from "./app/middlewares/rateLimit.js";
 import { requestId } from "./app/middlewares/requestId.js";
 import { requestLogger } from "./app/middlewares/requestLogger.js";
+import { integrationWebhooksRouter } from "./app/modules/integrations/integrations.router.js";
 import apiRoutes from "./app/routes/index.js";
 import { bigintToString } from "./app/utils/money.js";
 import { logger } from "./lib/logger.js";
@@ -65,6 +66,8 @@ if (env.BULL_BOARD_PASSWORD) {
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGINS, credentials: true, exposedHeaders: ["X-Request-Id"] }));
 app.use(rateLimit({ name: "global", windowSeconds: 60, max: 300 }));
+// Before the JSON parser, because a signature is checked against the exact bytes the provider sent.
+app.use("/api/v1/webhooks/integrations", integrationWebhooksRouter);
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 

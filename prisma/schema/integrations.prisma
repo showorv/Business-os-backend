@@ -1,0 +1,234 @@
+enum ConnectionStatus {
+  ACTIVE
+  NEEDS_REAUTH
+  DISABLED
+}
+
+enum SyncRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum StatementImportStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum StatementDirection {
+  IN
+  OUT
+}
+
+enum StatementLineStatus {
+  UNMATCHED
+  // A transaction exists for it, but isn't in the ledger yet (a draft, or waiting for approval).
+  AWAITING_POSTING
+  MATCHED
+  IGNORED
+}
+
+// A live link between one financial account and a provider. Statement files need no connection.
+model IntegrationConnection {
+  id                  String           @id @default(uuid(7)) @db.Uuid
+  workspaceId         String           @map("workspace_id") @db.Uuid
+  businessId          String           @map("business_id") @db.Uuid
+  financialAccountId  String           @map("financial_account_id") @db.Uuid
+  provider            String
+  status              ConnectionStatus @default(ACTIVE)
+  // Encrypted with a key unique to the workspace. Never returned by the API.
+  encryptedSecrets    String           @map("encrypted_secrets")
+  syncCursor          String?          @map("sync_cursor")
+  syncEveryHours      Int              @default(6) @map("sync_every_hours")
+  lastSyncedAt        DateTime?        @map("last_synced_at") @db.Timestamptz(3)
+  lastBalanceMinor    BigInt?          @map("last_balance_minor")
+  consecutiveFailures Int              @default(0) @map("consecutive_failures")
+  // Set while a sync runs, so one connection never syncs twice at once.
+  syncingSince        DateTime?        @map("syncing_since") @db.Timestamptz(3)
+  createdBy           String           @map("created_by") @db.Uuid
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business         Business         @relation(fields: [businessId], references: [id])
+  financialAccount FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  syncRuns         SyncRun[]
+  statementLines   StatementLine[]
+  rawPayloads      RawPayload[]
+
+  @@unique([financialAccountId, provider])
+  @@index([businessId, id(sort: Desc)])
+  @@index([status, lastSyncedAt])
+  @@map("integration_connections")
+}
+
+model SyncRun {
+  id           String        @id @default(uuid(7)) @db.Uuid
+  workspaceId  String        @map("workspace_id") @db.Uuid
+  businessId   String        @map("business_id") @db.Uuid
+  connectionId String        @map("connection_id") @db.Uuid
+  status       SyncRunStatus @default(RUNNING)
+  fetched      Int           @default(0)
+  newLines     Int           @default(0) @map("new_lines")
+  skipped      Int           @default(0)
+  failed       Int           @default(0)
+  cursorAfter  String?       @map("cursor_after")
+  errorCode    String?       @map("error_code")
+  startedAt    DateTime      @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt   DateTime?     @map("finished_at") @db.Timestamptz(3)
+
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id])
+
+  @@index([connectionId, id(sort: Desc)])
+  @@index([businessId])
+  @@map("sync_runs")
+}
+
+// What a provider actually sent, with secrets removed, kept briefly to help investigate problems.
+model RawPayload {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  connectionId String   @map("connection_id") @db.Uuid
+  kind         String
+  payload      Json
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  connection IntegrationConnection @relation(fields: [connectionId], references: [id])
+
+  @@index([connectionId])
+  @@index([createdAt])
+  @@map("raw_payloads")
+}
+
+// Which column is which in one bank's statement file, saved so it's only worked out once.
+model StatementTemplate {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  businessId  String   @map("business_id") @db.Uuid
+  name        String
+  mapping     Json
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business Business @relation(fields: [businessId], references: [id])
+
+  @@unique([businessId, name])
+  @@map("statement_templates")
+}
+
+model StatementImport {
+  id                 String                @id @default(uuid(7)) @db.Uuid
+  workspaceId        String                @map("workspace_id") @db.Uuid
+  businessId         String                @map("business_id") @db.Uuid
+  financialAccountId String                @map("financial_account_id") @db.Uuid
+  documentId         String                @map("document_id") @db.Uuid
+  mapping            Json
+  status             StatementImportStatus @default(QUEUED)
+  totalRows          Int                   @default(0) @map("total_rows")
+  newLines           Int                   @default(0) @map("new_lines")
+  duplicateRows      Int                   @default(0) @map("duplicate_rows")
+  failedRows         Int                   @default(0) @map("failed_rows")
+  balanceBreaks      Int                   @default(0) @map("balance_breaks")
+  // The first few rows that couldn't be read, with the reason.
+  rowErrors          Json                  @default("[]") @map("row_errors")
+  errorCode          String?               @map("error_code")
+  requestedBy        String                @map("requested_by") @db.Uuid
+  finishedAt         DateTime?             @map("finished_at") @db.Timestamptz(3)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business         Business         @relation(fields: [businessId], references: [id])
+  financialAccount FinancialAccount @relation(fields: [financialAccountId], references: [id])
+  document         Document         @relation(fields: [documentId], references: [id])
+  lines            StatementLine[]
+
+  @@index([businessId, id(sort: Desc)])
+  @@map("statement_imports")
+}
+
+// One line of a bank statement. Never touches the ledger by itself: it becomes part of the books only
+// by being matched to an existing journal line, or by creating a transaction.
+model StatementLine {
+  id                 String              @id @default(uuid(7)) @db.Uuid
+  workspaceId        String              @map("workspace_id") @db.Uuid
+  businessId         String              @map("business_id") @db.Uuid
+  financialAccountId String              @map("financial_account_id") @db.Uuid
+  connectionId       String?             @map("connection_id") @db.Uuid
+  importId           String?             @map("import_id") @db.Uuid
+  txnDate            DateTime            @map("txn_date") @db.Date
+  direction          StatementDirection
+  amountMinor        BigInt              @map("amount_minor")
+  feeMinor           BigInt              @default(0) @map("fee_minor")
+  balanceAfterMinor  BigInt?             @map("balance_after_minor")
+  description        String?
+  reference          String?
+  counterparty       String?
+  providerTxnId      String?             @map("provider_txn_id")
+  // The same statement row always gets the same hash, so importing it twice adds it once.
+  dedupeHash         String              @map("dedupe_hash")
+  status             StatementLineStatus @default(UNMATCHED)
+  // How it was settled: REFERENCE, AMOUNT_DATE, RULE, MANUAL.
+  matchedBy          String?             @map("matched_by")
+  // Why the automatic attempt couldn't finish, such as a closed period.
+  lastMatchError     String?             @map("last_match_error")
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  financialAccount FinancialAccount       @relation(fields: [financialAccountId], references: [id])
+  connection       IntegrationConnection? @relation(fields: [connectionId], references: [id])
+  statementImport  StatementImport?       @relation(fields: [importId], references: [id])
+  links            StatementLineLink[]
+
+  @@unique([financialAccountId, dedupeHash])
+  @@index([businessId, status, id(sort: Desc)])
+  @@index([financialAccountId, txnDate])
+  @@map("statement_lines")
+}
+
+// What a statement line settled against. More than one row when a line was split.
+model StatementLineLink {
+  id              String  @id @default(uuid(7)) @db.Uuid
+  businessId      String  @map("business_id") @db.Uuid
+  statementLineId String  @map("statement_line_id") @db.Uuid
+  transactionId   String? @map("transaction_id") @db.Uuid
+  // Empty until the transaction reaches the ledger. One journal line can settle only one statement line.
+  journalLineId   String? @unique @map("journal_line_id") @db.Uuid
+
+  statementLine StatementLine @relation(fields: [statementLineId], references: [id])
+  transaction   Transaction?  @relation(fields: [transactionId], references: [id])
+  journalLine   JournalLine?  @relation(fields: [journalLineId], references: [id])
+
+  @@index([statementLineId])
+  @@index([businessId])
+  @@index([transactionId])
+  @@map("statement_line_links")
+}
+
+// "Anything mentioning Facebook is Marketing." Contains-only text, never a pattern a user could
+// write to slow the server down.
+model StatementRule {
+  id             String             @id @default(uuid(7)) @db.Uuid
+  workspaceId    String             @map("workspace_id") @db.Uuid
+  businessId     String             @map("business_id") @db.Uuid
+  name           String
+  containsText   String             @map("contains_text")
+  direction      StatementDirection
+  categoryId     String             @map("category_id") @db.Uuid
+  // Above this, the line waits for a person.
+  maxAmountMinor BigInt?            @map("max_amount_minor")
+  // True posts to the ledger. False leaves a draft.
+  autoPost       Boolean            @default(false) @map("auto_post")
+  priority       Int                @default(100)
+  isActive       Boolean            @default(true) @map("is_active")
+  createdBy      String             @map("created_by") @db.Uuid
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business Business @relation(fields: [businessId], references: [id])
+  category Category @relation(fields: [categoryId], references: [id])
+
+  @@index([businessId, priority])
+  @@map("statement_rules")
+}

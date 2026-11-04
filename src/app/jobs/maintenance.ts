@@ -10,7 +10,9 @@ import { NotificationType } from "../modules/notifications/notifications.interfa
 import { notificationsService } from "../modules/notifications/notifications.service.js";
 import { recurringSchedulesService } from "../modules/recurring-schedules/recurring-schedules.service.js";
 import { reportsService } from "../modules/reports/reports.service.js";
+import { statementLinesService } from "../modules/statement-lines/statement-lines.service.js";
 import { requeueStuckDeliveries } from "./deliveryRelay.js";
+import { queueDueSyncs } from "./integrationSync.js";
 import { scanOverdueTasks } from "./overdueScan.js";
 import { reconcileReminders } from "./reminderJobs.js";
 
@@ -22,6 +24,7 @@ const PUBLISHED_EVENT_DAYS = 30;
 const EXPORT_FILE_DAYS = 30;
 const NOTIFICATION_DAYS = 180;
 const USED_RESET_TOKEN_DAYS = 7;
+const RAW_PAYLOAD_DAYS = 30;
 
 const daysAgo = (days: number) => new Date(Date.now() - days * DAY_MS);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -105,6 +108,7 @@ export const cleanUp = async () => {
   const events = await prisma.outboxEvent.deleteMany({ where: { publishedAt: { lt: daysAgo(PUBLISHED_EVENT_DAYS) } } });
   const notifications = await prisma.notification.deleteMany({ where: { createdAt: { lt: daysAgo(NOTIFICATION_DAYS) } } });
   const resetTokens = await prisma.passwordResetToken.deleteMany({ where: { expiresAt: { lt: daysAgo(USED_RESET_TOKEN_DAYS) } } });
+  const rawPayloads = await prisma.rawPayload.deleteMany({ where: { createdAt: { lt: daysAgo(RAW_PAYLOAD_DAYS) } } });
 
   // An upload that was started and never finished. Soft-deleted, like any other document.
   const uploads = await prisma.document.findMany({
@@ -135,6 +139,7 @@ export const cleanUp = async () => {
     events: events.count,
     notifications: notifications.count,
     resetTokens: resetTokens.count,
+    rawPayloads: rawPayloads.count,
     abandonedUploads,
     exportFiles,
   };
@@ -149,6 +154,8 @@ const MAINTENANCE_JOBS: Record<string, { pattern: string; run: () => Promise<unk
   },
   "recurring.run-due": { pattern: "*/5 * * * *", run: () => recurringSchedulesService.runAllDue() },
   "tasks.overdue-scan": { pattern: "*/15 * * * *", run: scanOverdueTasks },
+  "integrations.sync-due": { pattern: "*/15 * * * *", run: queueDueSyncs },
+  "statement-lines.settle": { pattern: "*/15 * * * *", run: () => statementLinesService.settlePendingLinks() },
   "ledger.verify": { pattern: "0 2 * * *", run: checkLedgers },
   "audit.verify": { pattern: "30 2 * * *", run: checkAuditChains },
   "system.clean-up": { pattern: "0 3 * * *", run: cleanUp },

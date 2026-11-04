@@ -303,7 +303,7 @@ const runOccurrence = async (schedule: StoredSchedule, occurrenceDate: string) =
       },
       { key, requestHash: sha256Hex(key) },
       context,
-      "RECURRING",
+      { source: "RECURRING" },
     );
     await recordRun(schedule, occurrenceDate, { transactionId: body.id });
   } catch (error) {

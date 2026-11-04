@@ -233,60 +233,76 @@ const assertDraftValid = async (tx: Prisma.TransactionClient, businessId: string
 // Service functions
 // ---------------------------------------------------------------------------
 
+export interface TransactionOrigin {
+  source: "MANUAL" | "RECURRING" | "IMPORT" | "SYNC";
+  // Where the source has its own id for this. A unique index stops it being recorded twice.
+  providerTxnId?: string;
+}
+
+// In the caller's transaction, so importing a statement line and creating its transaction are one step.
+const createWithin = async (
+  tx: Prisma.TransactionClient,
+  business: BusinessContext,
+  body: ICreateTransactionBody,
+  context: RequestContext,
+  origin: TransactionOrigin = { source: "MANUAL" },
+) => {
+  if (body.postNow) assertPermission(business, Permission.LEDGER_POST);
+
+  const draft: ITransactionDraft = {
+    type: body.type,
+    accountId: body.accountId,
+    toAccountId: body.toAccountId ?? null,
+    categoryId: body.categoryId ?? null,
+    amountMinor: BigInt(body.amountMinor),
+    feeMinor: BigInt(body.feeMinor),
+    txnDate: toDbDate(body.txnDate),
+    referenceNo: body.referenceNo ?? null,
+  };
+
+  assertTransferFields(draft);
+  const currency = await resolveCurrency(tx, business.businessId, draft, body.currency);
+  await assertCategoryFits(tx, business.businessId, draft);
+  const duplicate = await findPossibleDuplicate(tx, business.businessId, draft);
+  const { transactionPrefix } = await businessesService.getTransactionSettings(tx, business.businessId);
+
+  const transaction = await tx.transaction.create({
+    data: {
+      ...draft,
+      workspaceId: business.workspaceId,
+      businessId: business.businessId,
+      number: await nextTransactionNumber(tx, business.businessId, draft.txnDate, transactionPrefix),
+      currency,
+      paymentMethod: body.paymentMethod ?? null,
+      description: body.description ?? null,
+      possibleDuplicate: duplicate !== null,
+      duplicateOfId: duplicate?.id ?? null,
+      source: origin.source,
+      providerTxnId: origin.providerTxnId ?? null,
+      createdBy: business.userId,
+    },
+  });
+
+  await auditService.recordForBusiness(tx, business, {
+    action: "transaction.created",
+    context,
+    entityType: "transaction",
+    entityId: transaction.id,
+    after: { number: transaction.number, type: draft.type, amountMinor: draft.amountMinor, currency, source: origin.source },
+  });
+  return toDto(body.postNow ? await submit(tx, business, transaction, context) : transaction);
+};
+
 // Everything starts as a DRAFT. postNow runs the post step in the same transaction.
 const create = (
   business: BusinessContext,
   body: ICreateTransactionBody,
   idempotency: IdempotencyRequest | null,
   context: RequestContext,
-  source: "MANUAL" | "RECURRING" = "MANUAL",
+  origin?: TransactionOrigin,
 ) =>
   withBusinessScope(business, (tx) =>
-    withIdempotency(tx, business.userId, idempotency, 201, async () => {
-      if (body.postNow) assertPermission(business, Permission.LEDGER_POST);
-
-      const draft: ITransactionDraft = {
-        type: body.type,
-        accountId: body.accountId,
-        toAccountId: body.toAccountId ?? null,
-        categoryId: body.categoryId ?? null,
-        amountMinor: BigInt(body.amountMinor),
-        feeMinor: BigInt(body.feeMinor),
-        txnDate: toDbDate(body.txnDate),
-        referenceNo: body.referenceNo ?? null,
-      };
-
-      assertTransferFields(draft);
-      const currency = await resolveCurrency(tx, business.businessId, draft, body.currency);
-      await assertCategoryFits(tx, business.businessId, draft);
-      const duplicate = await findPossibleDuplicate(tx, business.businessId, draft);
-      const { transactionPrefix } = await businessesService.getTransactionSettings(tx, business.businessId);
-
-      const transaction = await tx.transaction.create({
-        data: {
-          ...draft,
-          workspaceId: business.workspaceId,
-          businessId: business.businessId,
-          number: await nextTransactionNumber(tx, business.businessId, draft.txnDate, transactionPrefix),
-          currency,
-          paymentMethod: body.paymentMethod ?? null,
-          description: body.description ?? null,
-          possibleDuplicate: duplicate !== null,
-          duplicateOfId: duplicate?.id ?? null,
-          source,
-          createdBy: business.userId,
-        },
-      });
-
-      await auditService.recordForBusiness(tx, business, {
-        action: "transaction.created",
-        context,
-        entityType: "transaction",
-        entityId: transaction.id,
-        after: { number: transaction.number, type: draft.type, amountMinor: draft.amountMinor, currency, source },
-      });
-      return toDto(body.postNow ? await submit(tx, business, transaction, context) : transaction);
-    }),
+    withIdempotency(tx, business.userId, idempotency, 201, () => createWithin(tx, business, body, context, origin)),
   );
 
 const list = async (business: BusinessContext, query: IListTransactionsQuery) => {
@@ -561,6 +577,7 @@ const detachDocument = (
 
 export const transactionsService = {
   assertDraftValid,
+  createWithin,
   create,
   list,
   getOne,

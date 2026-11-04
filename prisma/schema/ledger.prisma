@@ -143,6 +143,7 @@ model JournalLine {
   entry          JournalEntry        @relation(fields: [journalEntryId], references: [id])
   ledgerAccount  LedgerAccount       @relation(fields: [ledgerAccountId], references: [id])
   reconciliation ReconciliationLine?
+  statementLink  StatementLineLink?
 
   @@unique([journalEntryId, lineNo])
   @@index([ledgerAccountId, journalEntryId])

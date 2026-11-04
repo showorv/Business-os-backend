@@ -136,9 +136,27 @@ const getOne = (business: BusinessContext, reconciliationId: string) =>
       },
     });
 
+    // Statement lines not yet settled are usually why a reconciliation won't reach zero.
+    const openStatementLines = await tx.statementLine.count({
+      where: {
+        financialAccountId: reconciliation.financialAccountId,
+        status: { in: ["UNMATCHED", "AWAITING_POSTING"] },
+        txnDate: { lte: reconciliation.statementDate },
+      },
+    });
+    const latestStatementLine = await tx.statementLine.findFirst({
+      where: { financialAccountId: reconciliation.financialAccountId, txnDate: { lte: reconciliation.statementDate }, balanceAfterMinor: { not: null } },
+      orderBy: [{ txnDate: "desc" }, { id: "desc" }],
+      select: { balanceAfterMinor: true, txnDate: true },
+    });
+
     return {
       ...toDto(reconciliation),
       ...balances,
+      openStatementLines,
+      latestStatementBalance: latestStatementLine
+        ? { balanceMinor: latestStatementLine.balanceAfterMinor, asOf: fromDbDate(latestStatementLine.txnDate) }
+        : null,
       unmatchedLines: unmatchedLines.map(({ entry, ...line }) => ({
         ...line,
         entryNo: entry.entryNo,
@@ -177,6 +195,31 @@ const matchLines = (business: BusinessContext, reconciliationId: string, journal
       reconciliation.statementDate,
       reconciliation.statementBalanceMinor,
     );
+  });
+
+// Brings in everything already matched to a statement line: the reason for importing statements at all.
+const applyStatementMatches = (business: BusinessContext, reconciliationId: string) =>
+  withBusinessScope(business, async (tx) => {
+    const reconciliation = await findOrThrow(tx, business.businessId, reconciliationId);
+    assertOpen(reconciliation.status);
+    const ledgerAccountId = reconciliation.financialAccount.ledgerAccountId!;
+
+    const lines = await tx.journalLine.findMany({
+      where: {
+        businessId: business.businessId,
+        ledgerAccountId,
+        reconciliation: null,
+        statementLink: { isNot: null },
+        entry: { entryDate: { lte: reconciliation.statementDate } },
+      },
+      select: { id: true },
+    });
+    await tx.reconciliationLine.createMany({
+      data: lines.map((line) => ({ reconciliationId, journalLineId: line.id, businessId: business.businessId })),
+      skipDuplicates: true,
+    });
+    const balances = await balancesFor(tx, business.businessId, ledgerAccountId, reconciliation.statementDate, reconciliation.statementBalanceMinor);
+    return { applied: lines.length, ...balances };
   });
 
 const unmatchLine = (business: BusinessContext, reconciliationId: string, journalLineId: string) =>
@@ -277,4 +320,5 @@ const close = (business: BusinessContext, reconciliationId: string, adjust: bool
     return toDto(closed);
   });
 
-export const reconciliationsService = { create, list, getOne, matchLines, unmatchLine, close };
+export const reconciliationsService = {
+  applyStatementMatches, create, list, getOne, matchLines, unmatchLine, close };

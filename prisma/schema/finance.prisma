@@ -62,6 +62,9 @@ model FinancialAccount {
   business             Business         @relation(fields: [businessId], references: [id])
   transactions         Transaction[]    @relation("TransactionAccount")
   incomingTransactions Transaction[]    @relation("TransactionToAccount")
+  integrationConnections IntegrationConnection[]
+  statementImports       StatementImport[]
+  statementLines         StatementLine[]
 
   @@unique([businessId, name])
   @@map("financial_accounts")
@@ -87,6 +90,7 @@ model Category {
   business      Business       @relation(fields: [businessId], references: [id])
   transactions  Transaction[]
     budgetLines   BudgetLine[]
+  statementRules StatementRule[]
 
   @@unique([businessId, type, name])
   @@map("categories")
@@ -125,6 +129,7 @@ model Transaction {
 
   business      Business                @relation(fields: [businessId], references: [id])
   recurringRuns RecurringRun[]
+  statementLinks StatementLineLink[]
   account       FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
   toAccount     FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
   category      Category?               @relation(fields: [categoryId], references: [id])

@@ -10,6 +10,8 @@ export const EventType = {
   TASK_COMMENTED: "task.commented",
   REMINDER_CHANGED: "reminder.changed",
   INVITATION_CREATED: "invitation.created",
+  STATEMENT_IMPORT_REQUESTED: "statement_import.requested",
+  INTEGRATION_SYNC_REQUESTED: "integration_sync.requested",
 } as const;
 
 export type EventType = (typeof EventType)[keyof typeof EventType];
