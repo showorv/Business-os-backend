@@ -9,6 +9,7 @@ export const QueueName = {
   NOTIFICATIONS: "notifications",
   MAINTENANCE: "maintenance",
   INTEGRATIONS: "integrations",
+  DOCUMENTS: "documents",
 } as const;
 
 export type QueueName = (typeof QueueName)[keyof typeof QueueName];
@@ -44,6 +45,8 @@ export const queues = {
   [QueueName.DOMAIN_EVENTS]: new Queue(QueueName.DOMAIN_EVENTS, { connection: queueConnection, defaultJobOptions }),
   [QueueName.REMINDERS]: new Queue(QueueName.REMINDERS, { connection: queueConnection, defaultJobOptions }),
   [QueueName.NOTIFICATIONS]: new Queue(QueueName.NOTIFICATIONS, { connection: queueConnection, defaultJobOptions }),
+  // Reading a long scan is slow and uses a lot of memory, so these retry fewer times.
+  [QueueName.DOCUMENTS]: new Queue(QueueName.DOCUMENTS, { connection: queueConnection, defaultJobOptions: { ...defaultJobOptions, attempts: 3 } }),
   // Jitter stops many failed syncs retrying against a provider at the same moment.
   [QueueName.INTEGRATIONS]: new Queue(QueueName.INTEGRATIONS, {
     connection: queueConnection,

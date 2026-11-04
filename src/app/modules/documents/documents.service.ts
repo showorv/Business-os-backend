@@ -1,14 +1,16 @@
 import { createHash, randomUUID } from "node:crypto";
 import { fileTypeFromBuffer } from "file-type";
 import type { Prisma } from "../../../lib/prisma.js";
-import { withBusinessScope } from "../../../lib/rls.js";
+import { withAiScope, withBusinessScope } from "../../../lib/rls.js";
 import { createDownloadUrl, createUploadUrl, deleteObject, openObjectStream } from "../../../lib/storage.js";
+import { searchDocuments } from "../../ai/search.js";
+import { EventType, publishEvent } from "../../utils/outbox.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
-import type { ICreateUploadBody, IListDocumentsQuery, UploadProblem } from "./documents.interface.js";
+import type { ICreateUploadBody, IListDocumentsQuery, ISearchDocumentsQuery, UploadProblem } from "./documents.interface.js";
 import { CSV_MIME } from "./documents.validation.js";
 
 const SNIFF_BYTES = 4100;
@@ -130,6 +132,7 @@ const completeUpload = async (business: BusinessContext, documentId: string, con
       entityId: documentId,
       after: { fileName: ready.fileName, mime: ready.mime, sizeBytes: ready.sizeBytes, sha256: ready.sha256 },
     });
+    await publishEvent(tx, business, EventType.DOCUMENT_UPLOADED, { documentId });
     return ready;
   });
 };
@@ -166,6 +169,8 @@ const remove = (business: BusinessContext, documentId: string, context: RequestC
     if (attachments > 0) throw new AppError(409, ErrorCode.DOCUMENT_IN_USE, { attachments });
 
     await tx.document.update({ where: { id: documentId }, data: { deletedAt: new Date() } });
+    // A deleted document must stop appearing in search straight away.
+    await tx.documentChunk.deleteMany({ where: { documentId } });
     await auditService.recordForBusiness(tx, business, {
       action: "document.deleted",
       context,
@@ -184,4 +189,23 @@ const assertReady = async (tx: Prisma.TransactionClient, businessId: string, doc
   if (!document) throw new AppError(422, ErrorCode.DOCUMENT_NOT_READY, { documentId });
 };
 
-export const documentsService = { createUpload, completeUpload, list, getDownloadUrl, remove, assertReady };
+const search = async (business: BusinessContext, query: ISearchDocumentsQuery) => {
+  const hits = await withAiScope({ userId: business.userId, workspaceId: business.workspaceId, businessIds: [business.businessId] }, (tx) =>
+    searchDocuments(tx, [business.businessId], query.q, query.limit, query.type ? [query.type] : undefined),
+  );
+  return hits;
+};
+
+// Reads a document again, such as after it failed, or when the embedding model has changed.
+const reindex = (business: BusinessContext, documentId: string, context: RequestContext) =>
+  withBusinessScope(business, async (tx) => {
+    const document = await findOrThrow(tx, business.businessId, documentId);
+    if (document.status !== "READY" || document.type === "STATEMENT") throw new AppError(409, ErrorCode.DOCUMENT_NOT_READY);
+
+    const after = await tx.document.update({ where: { id: documentId }, data: { ingestStatus: "NOT_STARTED" }, select: publicFields });
+    await auditService.recordForBusiness(tx, business, { action: "document.reindex_requested", context, entityType: "document", entityId: documentId });
+    await publishEvent(tx, business, EventType.DOCUMENT_UPLOADED, { documentId });
+    return after;
+  });
+
+export const documentsService = { search, reindex, createUpload, completeUpload, list, getDownloadUrl, remove, assertReady };

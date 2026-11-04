@@ -37,6 +37,7 @@ model User {
   notificationPreference  NotificationPreference?
   pushSubscriptions       PushSubscription[]
   passwordResetTokens     PasswordResetToken[]
+  aiConversations AiConversation[]
 
   @@map("users")
 }

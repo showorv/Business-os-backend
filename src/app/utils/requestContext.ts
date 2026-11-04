@@ -5,6 +5,8 @@ export interface RequestContext {
   ip: string | null;
   userAgent: string | null;
   requestId: string;
+  // Set when the request came through the AI assistant, so the audit log says so.
+  actorVia?: "ai";
 }
 
 const cleanIp = (raw: string | undefined) => {

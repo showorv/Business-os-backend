@@ -10,6 +10,7 @@ import "./accounting.docs.js";
 import "./analytics.docs.js";
 import "./tasks.docs.js";
 import "./integrations.docs.js";
+import "./ai.docs.js";
 import { registry } from "./registry.js";
 
 export const buildOpenApiDocument = () =>

@@ -3,7 +3,9 @@ import { logger } from "../../lib/logger.js";
 import { prisma } from "../../lib/prisma.js";
 import { QueueName, queues } from "../../lib/queues.js";
 import { deleteObject } from "../../lib/storage.js";
+import { ingestionService } from "../ai/ingestion.js";
 import { Permission } from "../constants/permissions.js";
+import { EventType } from "../utils/outbox.js";
 import { auditService } from "../modules/audit/audit.service.js";
 import { membersService } from "../modules/members/members.service.js";
 import { NotificationType } from "../modules/notifications/notifications.interface.js";
@@ -145,6 +147,17 @@ export const cleanUp = async () => {
   };
 };
 
+// Everything uploaded before Phase 8, or while the worker was off, gets read the same way.
+const queuePendingDocuments = async () => {
+  const ids = await ingestionService.listPending();
+  await Promise.all(
+    ids.map((documentId) =>
+      queues[QueueName.DOCUMENTS].add("document.ingest", { payload: { documentId }, type: EventType.DOCUMENT_UPLOADED }, { jobId: `ingest-${documentId}` }),
+    ),
+  );
+  return ids.length;
+};
+
 // Every timed job. The times are for Bangladesh, when the system is quietest.
 const TIMEZONE = "Asia/Dhaka";
 const MAINTENANCE_JOBS: Record<string, { pattern: string; run: () => Promise<unknown> }> = {
@@ -155,6 +168,7 @@ const MAINTENANCE_JOBS: Record<string, { pattern: string; run: () => Promise<unk
   "recurring.run-due": { pattern: "*/5 * * * *", run: () => recurringSchedulesService.runAllDue() },
   "tasks.overdue-scan": { pattern: "*/15 * * * *", run: scanOverdueTasks },
   "integrations.sync-due": { pattern: "*/15 * * * *", run: queueDueSyncs },
+  "documents.ingest-pending": { pattern: "*/15 * * * *", run: queuePendingDocuments },
   "statement-lines.settle": { pattern: "*/15 * * * *", run: () => statementLinesService.settlePendingLinks() },
   "ledger.verify": { pattern: "0 2 * * *", run: checkLedgers },
   "audit.verify": { pattern: "30 2 * * *", run: checkAuditChains },

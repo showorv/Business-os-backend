@@ -1,5 +1,6 @@
 import * as Sentry from "@sentry/node";
 import { Worker } from "bullmq";
+import { ingestionService } from "./app/ai/ingestion.js";
 import { relayDeliveries } from "./app/jobs/deliveryRelay.js";
 import type { EventJob } from "./app/jobs/eventTypes.js";
 import { registerMaintenanceJobs, runMaintenanceJob, startCatchUp } from "./app/jobs/maintenance.js";
@@ -33,6 +34,8 @@ const workers = [
     connection: queueConnection,
     concurrency: 5,
   }),
+  // One at a time: reading a long scan and working out its meaning uses a lot of memory.
+  new Worker<EventJob>(QueueName.DOCUMENTS, (job) => processEvent(job.data), { connection: queueConnection, concurrency: 1 }),
   // Provider limits are per connection, and a claim stops one connection syncing twice at once.
   new Worker<EventJob>(QueueName.INTEGRATIONS, (job) => processEvent(job.data), { connection: queueConnection, concurrency: 3 }),
   // One at a time, so a long nightly check can't overlap with itself.
@@ -51,6 +54,7 @@ for (const worker of workers) {
       void reportExportsService.markFailed(job.data.payload.exportId);
     }
     if (worker.name === QueueName.NOTIFICATIONS) void notificationsService.markDeliveryFailed(job.data.deliveryId);
+    if (worker.name === QueueName.DOCUMENTS && job.data.payload.documentId) void ingestionService.markFailed(job.data.payload.documentId);
     if (worker.name === QueueName.INTEGRATIONS && job.data.payload.importId) void statementImportsService.markFailed(job.data.payload.importId);
   });
 }

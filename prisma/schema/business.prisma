@@ -58,6 +58,7 @@ model Business {
   statementTemplates     StatementTemplate[]
   statementImports       StatementImport[]
   statementRules         StatementRule[]
+  aiProposals AiProposal[]
     budgets           Budget[]
     goals             Goal[]
     reportExports     ReportExport[]

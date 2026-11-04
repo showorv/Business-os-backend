@@ -37,6 +37,7 @@ model Document {
   attachments TransactionAttachment[]
   taskAttachments TaskAttachment[]
   statementImports StatementImport[]
+  chunks DocumentChunk[]
 
   @@index([businessId, id(sort: Desc)])
   @@map("documents")

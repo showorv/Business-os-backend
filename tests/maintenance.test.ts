@@ -134,13 +134,13 @@ describe("the timers", () => {
     await registerMaintenanceJobs();
     const schedulers = await queue.getJobSchedulers();
     expect(schedulers.map((scheduler) => scheduler.key).sort()).toEqual([
-      "audit.verify", "integrations.sync-due", "ledger.verify", "recurring.run-due", "reminders.reconcile", "statement-lines.settle", "system.clean-up", "tasks.overdue-scan",
+      "audit.verify", "documents.ingest-pending", "integrations.sync-due", "ledger.verify", "recurring.run-due", "reminders.reconcile", "statement-lines.settle", "system.clean-up", "tasks.overdue-scan",
     ]);
     await queue.obliterate({ force: true });
   });
 
   it("every timer has something to run", async () => {
-    for (const name of ["reminders.reconcile", "recurring.run-due", "tasks.overdue-scan", "integrations.sync-due", "statement-lines.settle", "ledger.verify", "audit.verify", "system.clean-up"]) {
+    for (const name of ["reminders.reconcile", "recurring.run-due", "tasks.overdue-scan", "documents.ingest-pending", "integrations.sync-due", "statement-lines.settle", "ledger.verify", "audit.verify", "system.clean-up"]) {
       await expect(runMaintenanceJob(name)).resolves.toBeDefined();
     }
   });

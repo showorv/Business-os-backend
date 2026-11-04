@@ -1,3 +1,4 @@
+import { ingestionService } from "../ai/ingestion.js";
 import { budgetsService } from "../modules/budgets/budgets.service.js";
 import { goalsService } from "../modules/goals/goals.service.js";
 import { reportExportsService } from "../modules/report-exports/report-exports.service.js";
@@ -53,6 +54,9 @@ export const processEvent = async (event: EventJob) => {
       return;
     case EventType.STATEMENT_IMPORT_REQUESTED:
       await statementImportsService.run(event.payload.importId!);
+      return;
+    case EventType.DOCUMENT_UPLOADED:
+      await ingestionService.ingest(event.payload.documentId!);
       return;
     case EventType.INTEGRATION_SYNC_REQUESTED:
       await runSync(event.payload.connectionId!);

@@ -21,6 +21,8 @@ router.post(
 );
 router.post("/:documentId/complete", canWrite, validate({ params }), documentsController.completeUpload);
 router.get("/", canRead, validate({ query: documentsValidation.listQuery }), documentsController.list);
+router.get("/search", canRead, validate({ query: documentsValidation.searchQuery }), documentsController.search);
+router.post("/:documentId/reindex", canWrite, validate({ params }), documentsController.reindex);
 router.get("/:documentId/download", canRead, validate({ params }), documentsController.getDownloadUrl);
 router.delete("/:documentId", canWrite, validate({ params }), documentsController.remove);
 

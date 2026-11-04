@@ -73,8 +73,8 @@ const syncDueReminder = (
 const tellAssignee = (tx: Prisma.TransactionClient, business: BusinessContext, taskId: string, assigneeId: string) =>
   publishEvent(tx, business, EventType.TASK_ASSIGNED, { taskId, assigneeId });
 
-const create = (business: BusinessContext, body: ICreateTaskBody, context: RequestContext) =>
-  withBusinessScope(business, async (tx) => {
+// In the caller's transaction, so confirming an AI proposal and creating its task are one step.
+const createWithin = async (tx: Prisma.TransactionClient, business: BusinessContext, body: ICreateTaskBody, context: RequestContext) => {
     if (body.assigneeId) await assertAssignable(tx, business.businessId, body.assigneeId);
 
     const task = await tx.task.create({
@@ -99,7 +99,10 @@ const create = (business: BusinessContext, body: ICreateTaskBody, context: Reque
     if (task.assigneeId && task.assigneeId !== business.userId) await tellAssignee(tx, business, task.id, task.assigneeId);
     await syncDueReminder(tx, business, task);
     return toDto(task);
-  });
+};
+
+const create = (business: BusinessContext, body: ICreateTaskBody, context: RequestContext) =>
+  withBusinessScope(business, (tx) => createWithin(tx, business, body, context));
 
 const buildFilter = (query: IAllBusinessesTasksQuery, userId: string): Prisma.TaskWhereInput => {
   const dueAt = {
@@ -357,6 +360,7 @@ const detachDocument = (business: BusinessContext, taskId: string, documentId: s
   });
 
 export const tasksService = {
+  createWithin,
   create,
   list,
   listAllBusinesses,

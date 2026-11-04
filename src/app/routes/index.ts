@@ -19,6 +19,7 @@ import { notificationsRouter } from "../modules/notifications/notifications.rout
 import { recurringSchedulesRouter } from "../modules/recurring-schedules/recurring-schedules.router.js";
 import { remindersRouter } from "../modules/reminders/reminders.router.js";
 import { allTasksRouter, tasksRouter } from "../modules/tasks/tasks.router.js";
+import { aiRouter } from "../modules/ai/ai.router.js";
 import { integrationsRouter } from "../modules/integrations/integrations.router.js";
 import { statementImportsRouter } from "../modules/statement-imports/statement-imports.router.js";
 import { statementLinesRouter } from "../modules/statement-lines/statement-lines.router.js";
@@ -41,6 +42,7 @@ const moduleRoutes = [
   { path: "/exchange-rates", router: exchangeRatesRouter },
   { path: "/consolidated", router: consolidatedRouter },
   { path: "/notifications", router: notificationsRouter },
+  { path: "/ai", router: aiRouter },
   { path: "/tasks", router: allTasksRouter },
   { path: "/businesses", router: businessesRouter },
   { path: "/businesses/:businessId/members", router: membersRouter },

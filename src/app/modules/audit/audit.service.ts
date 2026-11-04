@@ -71,7 +71,7 @@ const record = async (tx: Prisma.TransactionClient, entry: AuditEntry) => {
     workspaceId,
     businessId: entry.businessId ?? null,
     actorUserId: entry.actorUserId ?? null,
-    actorVia: entry.actorVia ?? "web",
+    actorVia: entry.actorVia ?? entry.context?.actorVia ?? "web",
     action: entry.action,
     entityType: entry.entityType ?? null,
     entityId: entry.entityId ?? null,

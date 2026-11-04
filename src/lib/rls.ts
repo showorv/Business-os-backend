@@ -24,6 +24,24 @@ export const withRls = <T>(scope: RlsScope, work: (tx: Prisma.TransactionClient)
     return work(tx);
   });
 
+const AI_ROLE = "readonly_ai";
+const AI_STATEMENT_TIMEOUT = "5s";
+
+// For the AI's tools. It can read only the ai_* views, which have this scope built into them, and the
+// transaction itself is read-only. So even a bug in a tool can't change anything or see another business.
+export const withAiScope = <T>(scope: RlsScope, work: (tx: Prisma.TransactionClient) => Promise<T>) =>
+  prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      SELECT
+        set_config('role', ${AI_ROLE}, true),
+        set_config('app.user_id', ${scope.userId}, true),
+        set_config('app.workspace_id', ${scope.workspaceId ?? ""}, true),
+        set_config('app.business_ids', ${`{${scope.businessIds.join(",")}}`}, true),
+        set_config('statement_timeout', ${AI_STATEMENT_TIMEOUT}, true),
+        set_config('transaction_read_only', 'on', true)`;
+    return work(tx);
+  });
+
 // The usual form: everything under /businesses/:businessId runs in exactly one business.
 export const withBusinessScope = <T>(
   business: { userId: string; workspaceId: string; businessId: string },

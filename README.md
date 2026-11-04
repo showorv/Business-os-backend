@@ -12,9 +12,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | 4 | Double-entry ledger | ✅ Done |
 | 5 | Analytics & reports | ✅ Done |
 | 6 | Tasks & reminders (email, notifications) | ✅ Done |
-| **7** | **Integrations (statement import, matching)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 8 | AI & RAG | ⬜ Next |
-| 9 | Frontend | ⬜ |
+| 7 | Integrations (statement import, matching) | ✅ Done |
+| **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 9 | Frontend | ⬜ Next |
 | 10 | Hardening & launch | ⬜ |
 
 ## Run it
@@ -96,6 +96,8 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run db:provision` | Gives older businesses any starting data added since they were created. Safe to repeat |
 | `npm run audit:verify` | Checks the audit hash chain; exits with 1 if it finds tampering |
 | `npm run ledger:verify` | Checks every journal balances and every cached balance matches the ledger; exits with 1 if not. The worker also runs this nightly |
+| `npm run test:models` | Tests the real embedding model and OCR. Slow, so it isn't in `npm test` |
+| `npm run ai:eval` | Scores the real AI against the evaluation set. Needs `AI_API_KEY`, and uses your daily quota |
 | `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
 | `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
 
@@ -118,6 +120,7 @@ src/
     ├── exports/           reportTable, renderPdf, renderXlsx, renderCsv
     ├── notifications/     templates (email and push wording, English and Bangla)
     ├── integrations/      adapter (the contract), registry, sandbox.adapter, statementFile (reads CSV and Excel)
+    ├── ai/                provider, orchestrator, tools, guard, search, ingestion, extractText, chunkText
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
@@ -153,7 +156,8 @@ src/
         ├── statement-templates/  same five files
         ├── statement-imports/    same five files
         ├── statement-lines/      same five files (the matcher and review inbox)
-        └── statement-rules/      same five files
+        ├── statement-rules/      same five files
+        └── ai/               same five files (chat, conversations, proposals)
 prisma/
 ├── schema/                schema, workspace, auth, business, finance, ledger, analytics, tasks, notifications, document and audit models
 └── migrations/
@@ -216,6 +220,132 @@ requireAuth              who are you?
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 8
+
+**The goal:** ask questions about your business in English or Bangla, and get answers you can trust, with their source.
+
+**The main rule: the AI never sees your database, and it can't make up a figure.** It only picks from a fixed list of tools, the tools work out the numbers, and every number in the answer is checked against what the tools returned.
+
+### How one question travels
+```
+"নভেম্বরে আমার আয় কত?"
+   │  Signed in? Under the rate limit and daily budget? Looks like an attack?
+   ▼
+The server works out which businesses you may ask about    <── never the AI
+   │
+   ▼
+The AI picks a tool: get_pnl(1 Nov to 30 Nov)              <── checked like any request
+   │
+   ▼
+The tool reads your books through a read-only role, and works out ৳5,00,000.00
+   │
+   ▼
+The AI writes the sentence
+   │
+   ▼
+Number check: is every number in this answer one the tool gave?
+   │  no ──> one chance to fix it ──> still no ──> shows the true figures instead
+   ▼
+Answer + which business, what period, posted actuals + saved with tokens used
+```
+
+### Step 1. The AI provider
+`src/app/ai/provider.ts` is the only code that knows which company is used. Anything with an OpenAI-style API fits, so **changing company means changing three settings**: `AI_API_KEY`, `AI_BASE_URL` and `AI_CHAT_MODEL`. The defaults are Groq's free plan.
+
+**Why Groq rather than Gemini's free plan:** [Gemini's free terms](https://aistudio.google.com/docs/terms) say your data improves Google's products, that people may read it, and not to submit confidential information. [Groq says](https://console.groq.com/docs/your-data) it doesn't keep your requests by default, except to investigate failures or abuse. Check both before relying on them, as terms change.
+
+**To switch it on:** create a key at [console.groq.com](https://console.groq.com) and add `AI_API_KEY=...` to `.env`. Without a key, the assistant answers `AI_NOT_CONFIGURED`, and everything else, including document search, still works.
+
+### Step 2. The tools
+| Tool | Answers | Needs |
+|---|---|---|
+| `get_pnl` | Revenue, expenses and profit for a period | `finance.read` |
+| `compare_periods` | The change between two periods, with percent | `finance.read` |
+| `get_balances` | Each account's balance, today or on a past date | `finance.read` |
+| `expense_by_category` | Spending by account, largest first | `finance.read` |
+| `cash_flow` | Operating, investing and financing cash | `finance.read` |
+| `upcoming_obligations` | Bills and salaries coming up, labelled as plans | `finance.read` |
+| `budget_status`, `goal_progress` | Limits and targets against actuals | `finance.read` |
+| `list_tasks` | Open or overdue tasks | `tasks.read` |
+| `search_documents` | What your contracts and invoices say | `documents.read` |
+| `list_accounts_and_categories` | Ids needed for a proposal | `finance.read` |
+| `propose_transaction`, `propose_task` | A suggestion you confirm | `finance.write` or `tasks.write` |
+
+**Money is worked out in code, and already formatted** by the same `formatMoney` as PDFs, in lakh grouping and your digit style. So the AI never does arithmetic. The tools are tested to agree with the formal reports.
+
+### Step 3. The safety rules
+| Rule | How it's enforced |
+|---|---|
+| **The AI can't change anything** | Its tools use a separate database role, `readonly_ai`, in a read-only transaction with a 5-second limit |
+| **It can't read your tables** | That role can read only the `ai_*` views. Not `users`, not `transactions`, not secrets |
+| **It can't see another business** | The server picks the businesses. Each tool checks again, and each view filters by the session's list. Tests try all of these |
+| **No made-up numbers** | The number check above. Bangla digits and separators don't fool it |
+| **Documents can't give it orders** | Their text is labelled as untrusted data. **Once a document has been read, the proposal tools are taken away for the rest of that answer**, so a sentence hidden in a contract can't create a transaction |
+| **Obvious attacks never reach it** | "Ignore previous instructions" and SQL are refused first, in English and Bangla |
+| **It can't overspend** | 20 questions a minute per person, and `AI_DAILY_TOKEN_LIMIT` per workspace |
+
+**Be realistic about the attack screening:** a list of patterns catches obvious attempts, not clever ones. What protects you is the rest of the table, which holds even if someone fools the AI completely.
+
+### Step 4. Reading your documents
+Each upload goes through the worker. **Nothing here leaves your computer, and it costs nothing per document.**
+
+```
+Upload ──> check it wasn't swapped ──> malware scan ──> read the text ──> split into passages
+                                                                                │
+                                         saved in PostgreSQL, with pgvector <── meaning as 384 numbers
+```
+
+- **PDF with English text:** read directly, which is fast.
+- **Scans, photos, and PDF pages with Bangla:** read with OCR, using Tesseract's Bangla and English data. Text stored in a Bangla PDF usually comes out broken, so those pages are read as images. In testing it read Bangla correctly.
+- **Passages:** about 300 words with a 40-word overlap, keeping the page and heading.
+- **Meaning:** `multilingual-e5-small` runs on your machine and downloads once, about 120 MB. It trained on Bengali, so a Bangla question finds an English contract.
+- **Limits:** OCR reads at most 50 pages of one document, and the audit log records how many were skipped.
+- **Earlier uploads** are picked up automatically by a timer. Statements are left out, because their figures belong in the ledger.
+
+**Two gaps from earlier phases are now closed:** a file swapped after upload is refused, because its hash is checked again, and malware scanning exists. Scanning needs a ClamAV server: set `CLAMAV_HOST`. Without one, documents stay `NOT_SCANNED`.
+
+### Step 5. Searching
+`GET /businesses/:id/documents/search?q=` **needs no AI key**, so you can try it right away. It combines two searches:
+
+| Search | Good at |
+|---|---|
+| By meaning | "ভাড়ার চুক্তি" finding "lease agreement" |
+| By exact words | An invoice number such as `INV-2041` |
+
+A passage near the top of either list rises. Very common words such as "the" and "হবে" are left out of the word search, because in testing they pushed the wrong documents up.
+
+### Step 6. Proposals
+When you say "record 5,000 rent", the AI makes a **suggestion**, and nothing is saved:
+
+```
+AI suggests ──> a card waits for you ──> POST /ai/proposals/:id/confirm
+                                             │  Normal transaction rules, with today's permissions
+                                             ▼
+                                         A draft, or posted with postNow. The audit log says via = ai
+```
+
+Two clicks create one transaction. Suggestions expire after 7 days, and only the person who asked can confirm one.
+
+### The evaluation set
+`evaluation/questions.ts` has 52 real questions, 20 of them in Bangla, each with the right tool and exact figures, checked against known books. They run in two ways:
+
+| | Scripted (`npm test`) | Real (`npm run ai:eval`) |
+|---|---|---|
+| **Proves** | The right tool gives the right figure, and the checks hold | The real AI picks the right tool and writes it correctly |
+| **Needs** | Nothing | `AI_API_KEY` |
+| **Cost** | None | Uses your daily quota, so it runs 12 questions by default |
+
+The real run saves `evaluation/last-report.json`, with each question, answer and result. Set `AI_EVAL_LIMIT=52` for all of them, but that can use most of a day's free quota.
+
+### New settings in `.env`
+| Setting | Purpose |
+|---|---|
+| `AI_API_KEY` | Switches the assistant on |
+| `AI_BASE_URL`, `AI_CHAT_MODEL` | Which company and model. Defaults to Groq |
+| `AI_DAILY_TOKEN_LIMIT` | The most one workspace may use in a day. Default 100,000 |
+| `CLAMAV_HOST`, `CLAMAV_PORT` | Malware scanning. Off when empty |
+| `MODEL_CACHE_DIR` | Where the embedding model is saved. Default `.cache` |
 
 ## What was built in Phase 7
 
@@ -1047,6 +1177,13 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | GET | `.../connections/:connectionId/sync-runs` | `integrations.manage` | Sync history |
 | POST | `/webhooks/integrations/:connectionId` | Provider's signature | Called by a provider |
 | POST | `.../reconciliations/:reconciliationId/apply-statement-matches` | `ledger.post` | Clear everything already matched |
+| GET | `/ai/status` | Bearer | Is it on, and today's token use |
+| POST | `/ai/chat` | `ai.use` | Ask a question |
+| GET | `/ai/conversations`, `/ai/conversations/:id` | Bearer | Your conversations |
+| GET | `/ai/proposals` | Bearer | Your suggestions |
+| POST | `/ai/proposals/:id/confirm`, `/reject` | Bearer, then the normal permission | Decide on a suggestion |
+| GET | `.../documents/search?q=` | `documents.read` | Search by meaning and words, with no AI key |
+| POST | `.../documents/:documentId/reindex` | `documents.write` | Read a document again |
 | GET / POST | `/businesses/:businessId/reconciliations` | `finance.read` / `ledger.post` | List or start |
 | GET | `.../reconciliations/:reconciliationId` | `finance.read` | Difference and unmatched lines |
 | POST | `.../reconciliations/:reconciliationId/lines` | `ledger.post` | Match lines |
@@ -1089,6 +1226,17 @@ docker exec business_os_redis redis-cli flushall
 ```
 
 ## How it was verified
+
+**Phase 8:**
+- **729 integration tests pass** (123 of them new), using a scripted stand-in for the AI company.
+- **The real embedding model and OCR ran on this Mac** (`npm run test:models`, 9 tests). Bangla questions found English passages and the other way round, and OCR read Bangla from an image and a PDF.
+- **The real API and worker were run together,** with the real models and a local stand-in for Groq over real HTTP. A real English PDF, Bangla PDF and scan were all read in about 4 seconds, and the searches above found the right documents. All 333 Postman requests pass with 519 assertions, reaching all 170 documented operations, and no jobs failed.
+- **As a role like Neon's owner:** the suite passes, on a database upgraded from Phase 7's tables. The migration adds tables, views and a role, and doesn't change existing rows.
+- **The protections were proven real:** switching off RLS on `ai_messages` or `document_chunks`, giving the AI's role access to a table, or removing the business filter from a view each makes the tests fail. Switching off RLS on `ai_proposals` didn't at first, because the code checks too, so a test now checks the database directly.
+- **Testing caught three real problems:**
+  - When OCR couldn't download its data, it crashed the whole worker, not just one job. Fixed, and the language data now ships with the app, so OCR needs no internet.
+  - Text stored in a Bangla PDF came out broken, so those pages now go through OCR.
+  - Common words pushed the wrong documents up the search results. They're now left out of the word search.
 
 **Phase 7:**
 - **606 integration tests pass** (144 of them new), with real uploads to MinIO. They cover amounts and dates in the formats banks use, Excel and UTF-16 files, repeated and overlapping imports, each matching step and when it must not match, three people acting on one line at once, closed periods and reversals.
@@ -1146,9 +1294,13 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
+- **The real AI has never answered a question,** because there's no key yet. Tool choice, Bangla wording and the real pass rate are unknown until you run `npm run ai:eval`. Everything around the model is tested.
+- **Real scanned documents.** OCR was tested on clean text rendered by a browser. A phone photo of a crumpled receipt will read worse.
+- **A real ClamAV server.** The scanner's protocol was tested against a local stand-in.
+- **The Phase 8 migration on Neon,** including `pgvector` there and the `readonly_ai` role.
 - **A real bank or MFS statement.** Tests use formats I wrote from what banks commonly produce, so your bank's file may need a mapping adjustment.
 - **Any live provider,** because there are no credentials. The sandbox proves the pipeline, not a real bank's API.
-- **The Phase 7 migration has not been run on Neon** (PostgreSQL 18). Phases 2 to 6 have been, as far as your database shows. It was tested on PostgreSQL 17.
+- **The Phase 7 migration on Neon** (PostgreSQL 18) hasn't been confirmed. It was tested on PostgreSQL 17.
 - **Phase 5 and 6's timing on Neon** hasn't been measured. Posting adds one query for the outbox event, on top of the 8.3 seconds measured in Phase 4.
 - **The worker's use of Neon** hasn't been measured. It checks the database every 2 seconds, which will probably stop Neon scaling to zero and can use up compute hours.
 - **A real email provider** hasn't been tried, only Mailpit. Real deliverability (spam folders, DKIM) depends on your provider.
@@ -1161,11 +1313,12 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`.
-2. **Keep the worker running.** Reminders, emails and recurring transactions all depend on it.
-3. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
-4. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
-5. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`.
+2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
+3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
+4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
+5. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
+6. **Choose hosting** at Phase 10. The API and worker each used about 800 to 900 MB once the embedding model had loaded, so plan for at least 4 GB of memory.
 
 ## Differences from the architecture document
 
@@ -1186,6 +1339,12 @@ docker exec business_os_redis redis-cli flushall
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
 | Progressive login delay | Fixed lockout after 5 failures | Simpler, and it covers the same threat |
+| A separate "intent" step before choosing tools | The AI picks tools directly | Same result with fewer tokens, which matters on a free plan |
+| A separate AI re-ranking step | Combined ranking from both searches | Needs no extra model or tokens. Worth revisiting if search misses things |
+| Passages of about 800 tokens | About 300 words | This embedding model reads at most 512 tokens and ignores the rest |
+| OCR data downloaded when needed | OCR data ships as npm packages | Works offline, and can't fail because a website is busy |
+| Answers streamed as they're written | The whole answer at once | Simpler. Worth adding in Phase 9 if waiting feels slow |
+| FX conversion in the AI's figures | Totals kept per currency | Adding taka and dollars needs a rate you chose, which the consolidated dashboard already handles |
 | Keys held in a KMS or Vault | One key per workspace, derived from your master key | Needs no extra service. Moving to a KMS later changes only `crypto.ts` |
 | Auto-post "per business setting" | Set on each rule | Some rules are safe to post and some aren't, so one business-wide switch is too blunt |
 | One hash on date, amount, reference and balance | The same, plus a counter for repeats | Otherwise two identical withdrawals on one day would become one |
@@ -1206,7 +1365,8 @@ docker exec business_os_redis redis-cli flushall
 | Salary withholding, employees, payslips | Future | The document's Payroll module. Salary schedules post the gross amount for now |
 | Custom notification choices per type | When needed | Preferences are per channel. The document only asks for channels and quiet hours |
 | Invoices, bills, and receivable and payable tracking | Future | Accrual-ready: the accounts exist, and manual journals work today |
-| Malware scanning and OCR | 8 | `scan_status` is `NOT_SCANNED` until the ingestion pipeline exists |
+| AI reading invoices into suggested transactions and reminders | When needed | The document marks this optional. OCR's text is ready for it |
+| Charts in AI answers | 9 | Needs the frontend. Figures come back as text and sources for now |
 | Enforcing `enabledModules` per business | SaaS | The setting is stored, but nothing reads it yet |
 | Counterparties (customers and suppliers) | Not in any phase's list | The ER diagram has the table, but no phase includes the module. `counterparty_id` is added when it's built |
 | Custom fields | Not in any phase's list | Section 8.4 describes them, but no phase includes them |
@@ -1214,12 +1374,12 @@ docker exec business_os_redis redis-cli flushall
 | Monthly partitions on `audit_logs` | Later | A scaling step, not needed at this size |
 | Grafana, Loki and Tempo containers | 10 | The app already exports telemetry; only the receiving side is missing |
 
-**Known gap:** an upload URL stays valid for its full 15 minutes, even after the file is marked `READY`. Someone holding the link could replace the file with another of the same size and type, leaving the saved hash out of date. Phase 8's scanning step is the natural place to re-check the hash.
+**Known gap:** an upload URL stays valid for its full 15 minutes, even after the file is marked `READY`. Someone holding the link could replace the file with another of the same size and type. Phase 8 refuses it if the worker reads it after the swap, but a swap after the worker has read it isn't noticed.
 
 **Known gap:** the document has no MFA recovery codes. Password reset keeps MFA on, as it should, so a user who loses their authenticator can still only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
 **Known gap:** the Phase 6 stream authenticates once when it opens. A session revoked during those 15 minutes keeps receiving until the token's life ends.
 
-## Before Phase 8
+## Before Phase 9
 
-Phase 8 adds the AI assistant: read-only tools for answering questions about your figures, search across your documents with OCR and embeddings, and proposals you confirm before anything is written. It needs answers from you: **which LLM and embedding provider, and are you comfortable sending financial summaries to it, or should sensitive fields be masked?**
+Phase 9 builds the React frontend: sign-in, the business switcher, dashboards with charts, finance, ledger, reports, tasks, documents, the review inbox, the AI panel, settings and the audit viewer. Nothing new is needed from you to start. Running `npm run ai:eval` first would show whether the AI needs changing before it gets a screen.

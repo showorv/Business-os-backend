@@ -30,4 +30,11 @@ const createUpload = z
 
 const listQuery = z.object({ ...paginationQuery, type: documentType.optional() });
 
-export const documentsValidation = { documentParams, createUpload, listQuery };
+const searchQuery = z.object({
+  q: textField(500),
+  limit: z.coerce.number().int().min(1).max(20).default(5),
+  type: z.enum(["INVOICE", "RECEIPT", "CONTRACT", "POLICY", "NOTE"]).optional(),
+});
+
+export const documentsValidation = {
+  searchQuery, documentParams, createUpload, listQuery };

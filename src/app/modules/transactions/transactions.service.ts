@@ -234,7 +234,7 @@ const assertDraftValid = async (tx: Prisma.TransactionClient, businessId: string
 // ---------------------------------------------------------------------------
 
 export interface TransactionOrigin {
-  source: "MANUAL" | "RECURRING" | "IMPORT" | "SYNC";
+  source: "MANUAL" | "RECURRING" | "IMPORT" | "SYNC" | "AI";
   // Where the source has its own id for this. A unique index stops it being recorded twice.
   providerTxnId?: string;
 }

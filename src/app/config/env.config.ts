@@ -58,6 +58,18 @@ const envSchema = z
     // Leave empty to switch off the queue screen at /admin/queues. Sign in as "admin".
     BULL_BOARD_PASSWORD: z.preprocess(emptyToUndefined, z.string().min(12).optional()),
 
+    // Any service with an OpenAI-style API. The default is Groq. Leave the key empty to switch the
+    // assistant off; document search keeps working, because embeddings run here.
+    AI_API_KEY: optionalString,
+    AI_BASE_URL: z.url().default("https://api.groq.com/openai/v1"),
+    AI_CHAT_MODEL: z.string().default("openai/gpt-oss-120b"),
+    AI_DAILY_TOKEN_LIMIT: z.coerce.number().int().positive().default(100_000),
+    // Where the embedding model and OCR language data are saved after their first download.
+    MODEL_CACHE_DIR: z.string().default(".cache"),
+    // A ClamAV daemon. Leave empty to switch malware scanning off: documents then stay NOT_SCANNED.
+    CLAMAV_HOST: optionalString,
+    CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })

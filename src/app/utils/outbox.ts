@@ -12,6 +12,7 @@ export const EventType = {
   INVITATION_CREATED: "invitation.created",
   STATEMENT_IMPORT_REQUESTED: "statement_import.requested",
   INTEGRATION_SYNC_REQUESTED: "integration_sync.requested",
+  DOCUMENT_UPLOADED: "document.uploaded",
 } as const;
 
 export type EventType = (typeof EventType)[keyof typeof EventType];

@@ -1,0 +1,126 @@
+enum AiMessageRole {
+  USER
+  ASSISTANT
+}
+
+enum AiProposalKind {
+  TRANSACTION
+  TASK
+}
+
+enum AiProposalStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+  EXPIRED
+}
+
+// A passage of a document, with its meaning as numbers. The model is stored on each row, so changing
+// model means re-indexing rather than silently mixing vectors that can't be compared.
+model DocumentChunk {
+  id             String                   @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                   @map("workspace_id") @db.Uuid
+  businessId     String                   @map("business_id") @db.Uuid
+  documentId     String                   @map("document_id") @db.Uuid
+  chunkIndex     Int                      @map("chunk_index")
+  page           Int
+  heading        String?
+  content        String
+  embedding      Unsupported("vector(384)")
+  // Kept up to date by the database from `content`.
+  search         Unsupported("tsvector")? @default(dbgenerated())
+  embeddingModel String                   @map("embedding_model")
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  document Document @relation(fields: [documentId], references: [id])
+
+  @@unique([documentId, chunkIndex])
+  @@index([businessId])
+  @@map("document_chunks")
+}
+
+// One person's chat. Belongs to them, whichever businesses it asks about.
+model AiConversation {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  title       String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  user      User         @relation(fields: [userId], references: [id])
+  messages  AiMessage[]
+  proposals AiProposal[]
+
+  @@index([userId, id(sort: Desc)])
+  @@map("ai_conversations")
+}
+
+model AiMessage {
+  id               String        @id @default(uuid(7)) @db.Uuid
+  conversationId   String        @map("conversation_id") @db.Uuid
+  workspaceId      String        @map("workspace_id") @db.Uuid
+  userId           String        @map("user_id") @db.Uuid
+  role             AiMessageRole
+  content          String
+  language         String?       @db.VarChar(10)
+  // Which tools and documents the answer came from: period, businesses, currency, pages.
+  sources          Json          @default("[]")
+  // ok, corrected, fallback, blocked. See the output guard in src/app/ai/guard.ts.
+  guardStatus      String?       @map("guard_status")
+  model            String?
+  promptTokens     Int           @default(0) @map("prompt_tokens")
+  completionTokens Int           @default(0) @map("completion_tokens")
+  latencyMs        Int?          @map("latency_ms")
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id])
+  toolCalls    AiToolCall[]
+
+  @@index([conversationId, id])
+  @@index([workspaceId, createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_messages")
+}
+
+model AiToolCall {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  messageId String   @map("message_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tool      String
+  // What it was asked, never what it returned.
+  input     Json
+  rowCount  Int      @default(0) @map("row_count")
+  latencyMs Int      @map("latency_ms")
+  errorCode String?  @map("error_code")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  message AiMessage @relation(fields: [messageId], references: [id])
+
+  @@index([messageId])
+  @@map("ai_tool_calls")
+}
+
+// Something the AI suggests writing. Nothing happens until the person confirms it, and then it goes
+// through the normal service, with all its checks.
+model AiProposal {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  workspaceId    String           @map("workspace_id") @db.Uuid
+  businessId     String           @map("business_id") @db.Uuid
+  conversationId String           @map("conversation_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  kind           AiProposalKind
+  payload        Json
+  status         AiProposalStatus @default(PENDING)
+  resultId       String?          @map("result_id") @db.Uuid
+  expiresAt      DateTime         @map("expires_at") @db.Timestamptz(3)
+  decidedAt      DateTime?        @map("decided_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  business     Business       @relation(fields: [businessId], references: [id])
+  conversation AiConversation @relation(fields: [conversationId], references: [id])
+
+  @@index([userId, status])
+  @@index([businessId])
+  @@map("ai_proposals")
+}

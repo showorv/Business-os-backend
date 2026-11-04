@@ -11,3 +11,5 @@ src/generated/
 .DS_Store
 *.log
 .claude/settings.local.json
+.cache/
+evaluation/last-report.json
