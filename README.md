@@ -6,9 +6,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 
 | Phase | Name | Status |
 |---|---|---|
-| **1** | **Foundation & auth** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 2 | Multi-business (businesses, members, RBAC, RLS) | ⬜ Next |
-| 3 | Accounts & transactions | ⬜ |
+| 1 | Foundation & auth | ✅ Done |
+| **2** | **Multi-business (businesses, members, RBAC, RLS)** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 3 | Accounts & transactions | ⬜ Next |
 | 4 | Double-entry ledger | ⬜ |
 | 5 | Analytics & reports | ⬜ |
 | 6 | Tasks & reminders (BullMQ, email) | ⬜ |
@@ -66,10 +66,9 @@ npm run dev
 
 ### Which database does `.env` use?
 
-Your `.env` currently points to **Neon**, and the migration has **not** been applied there. Neon's database holds a demo table called `playing_with_neon`, and Prisma normally refuses to migrate a non-empty database that has no migration history. You have two options:
+Your `.env` points to **Neon**. Every new phase's migration must be applied there with `npm run db:deploy`.
 
-- **Use Neon:** drop that demo table if you don't need it, then run `npm run db:deploy`.
-- **Use local Docker:** set both `DATABASE_URL` and `DIRECT_DATABASE_URL` to `postgresql://business_os:business_os@localhost:5432/business_os`.
+To use local Docker instead, set both `DATABASE_URL` and `DIRECT_DATABASE_URL` to `postgresql://business_os:business_os@localhost:5432/business_os`.
 
 Tests never touch Neon. They always use the local `business_os_test` database, and they stop with an error if pointed anywhere else.
 
@@ -85,6 +84,8 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run db:deploy` | Applies existing migrations |
 | `npm run db:status` | Shows which migrations are applied |
 | `npm run audit:verify` | Checks the audit hash chain; exits with 1 if it finds tampering |
+| `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
+| `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
 
 ## Folder structure
 
@@ -93,22 +94,28 @@ src/
 ├── server.ts              Starts the API and shuts it down cleanly
 ├── app.ts                 Express app: the middleware order lives here
 ├── instrument.ts          OpenTelemetry + Sentry, loaded before everything else
-├── lib/                   prisma, redis, logger
+├── lib/                   prisma, redis, logger, rls (the business transaction helper)
 ├── scripts/verify-audit.ts
 ├── types/express.d.ts     Adds req.auth, req.requestId, req.validated
 └── app/
     ├── config/            env.config.ts (validated environment)
+    ├── constants/         permissions.ts (permission and role names)
     ├── routes/index.ts    Module registry: a new module = one line here
-    ├── docs/openapi.ts    Swagger spec, built from the Zod schemas
-    ├── middlewares/       requestId, requestLogger, rateLimit, auth, csrf, validate, errorHandler
+    ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
+    ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
     ├── utils/             errors, jwt, cookies, crypto, lockout, normalize, validationFields...
     └── modules/
         ├── auth/          auth.router / controller / service / validation / interface
         ├── users/         same five files
-        └── audit/         same five files
+        ├── audit/         same five files
+        ├── businesses/    same five files
+        ├── members/       same five files
+        ├── invitations/   same five files
+        └── roles/         same five files
 prisma/
-├── schema/                schema, workspace, auth and audit models
+├── schema/                schema, workspace, auth, business and audit models
 └── migrations/
+postman/                   Collection and the script that generates it
 tests/                     Integration tests against real Postgres and Redis
 ```
 
@@ -134,6 +141,94 @@ Request
  → router → requireAuth → validate → controller → service → PostgreSQL
  → errorHandler   turns any failure into a coded JSON error
 ```
+
+### How a business request travels
+
+Everything under `/businesses/:businessId` adds these steps:
+
+```
+requireAuth              who are you?
+ → requireMembership     are you in this business? No: 404, plus an audit row
+ → requirePermission     does your role allow this? No: 403, plus an audit row
+ → requireWritableBusiness   is the business ACTIVE? No: 409 (only on routes that change data)
+ → requireRecentMfa      only on sensitive actions such as role changes
+ → validate → controller → service
+ → withBusinessScope     the database hides every other business
+```
+
+### How to add a new module (use this in every phase)
+
+1. **Tables:** add models in `prisma/schema/`, then run `npx prisma migrate dev --create-only --name your_change`.
+2. **Isolation:** for each business table, add `workspace_id` and `business_id`, and in the migration add the `GRANT`s and the RLS policy. Copy the pattern from the `invitations` table in `prisma/migrations/*_multi_business_rbac_rls/`.
+3. **Code:** create the five files in `src/app/modules/<name>/`.
+4. **Business data:** in the service, run every query inside `withBusinessScope(business, (tx) => ...)`, and write audit rows with `auditService.recordForBusiness(tx, business, ...)` in that same transaction.
+5. **Routes:** add one line in `src/app/routes/index.ts`. Use `Router({ mergeParams: true })` for routes under a business.
+6. **Docs and tests:** add a `*.docs.ts` file, a line in `docs/openapi.ts`, a test file, and a folder in `postman/generate-collection.mjs`.
+
+**New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
+
+**New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 2
+
+**The goal:** one person can run many businesses, invite people into each one, and nobody can see a business they don't belong to, even if the code has a bug.
+
+### Step 1. Tables
+| Table | Purpose |
+|---|---|
+| `businesses` | Name, type, currency, fiscal year, timezone, status, settings |
+| `business_members` | Who belongs to which business, with which role |
+| `invitations` | Pending invites; only a hash of the token is stored |
+| `roles`, `permissions`, `role_permissions` | The role table from the document, stored as data |
+
+### Step 2. Roles and permissions
+There are five system roles: OWNER, ADMIN, ACCOUNTANT, MANAGER and VIEWER. Permissions are checked by route, for example `requirePermission(Permission.MEMBERS_MANAGE)`. `finance.read` is the one optional grant: an owner or admin can add it to a Manager or Viewer through `extraPermissions`.
+
+### Step 3. Business context
+`requireMembership` loads your role and permissions into `req.business` and caches them in Redis for up to 60 seconds. Any change to a member or to the business status clears that cache, so it applies on the very next request. If Redis is down, it reads from the database.
+
+For a business you aren't in, the answer is always the same 404, whether the id is real, random or garbage, so ids can't be probed.
+
+### Step 4. Row-Level Security (RLS)
+This is the second lock, behind the app's own checks. PostgreSQL itself filters every row.
+
+**Why the app switches database role:** the role the app connects with (`neondb_owner` on Neon, a superuser in Docker) **bypasses RLS completely**. So `src/lib/rls.ts` starts each business transaction by switching to `business_os_app`, a restricted role that cannot bypass RLS, and by setting which businesses are allowed:
+
+```ts
+const members = await withBusinessScope(business, (tx) => tx.businessMember.findMany());
+// Even with no WHERE, PostgreSQL returns only this business's rows.
+```
+
+`business_os_app` has no `DELETE` on any table, no `UPDATE` on `audit_logs`, and no access to `users`. All the settings last only for that transaction, so they are safe on pooled connections.
+
+**When the normal connection is still used:** only where no business scope can exist yet: login, creating a business, accepting an invitation, and checking membership itself.
+
+### Step 5. Business lifecycle
+| Status | Behaviour | Can move to |
+|---|---|---|
+| `ACTIVE` | Normal | `INACTIVE`, `ARCHIVED` |
+| `INACTIVE` | Read-only (`BUSINESS_NOT_ACTIVE`) | `ACTIVE`, `ARCHIVED` |
+| `ARCHIVED` | Read-only, hidden from the list unless `?includeArchived=true` | `ACTIVE` |
+
+Businesses are never hard-deleted.
+
+### Step 6. Invitations
+1. An owner or admin calls `POST /businesses/:id/invitations` and gets a token, once. It lasts 7 days. **There is no email yet, so share it by hand until Phase 6.**
+2. The invited person logs in and calls `POST /invitations/accept` with the token.
+
+Their account email must match the invitation, so a stolen token is useless on another account. Inviting the same email again replaces the old invitation. Nobody can be invited as OWNER: an owner promotes an existing member instead.
+
+### Step 7. Member rules
+- A business always keeps at least one owner (`LAST_OWNER`), even if two owners demote each other at the same moment.
+- Only an owner can change an owner or create one.
+- Changing a role or removing a member needs recent MFA if the person doing it has MFA on.
+- Removing a member keeps the row, so audit history still makes sense.
+
+### Step 8. Business audit
+`GET /businesses/:id/audit` shows one business's history, with `audit.read`. Denied access and denied permissions are recorded too. The hash chain spans a whole workspace but RLS hides other businesses' rows, so the database function `audit_chain_head` returns only the latest hash, keeping the chain unbroken.
+
+### Step 9. Settings
+`settings` is validated by the Zod schema in `businesses.validation.ts` and has a `version`. A `PATCH` merges only the keys you send. Amounts are integer strings in minor units, and Bangla digits are accepted.
 
 ## What was built in Phase 1
 
@@ -232,6 +327,20 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | POST | `/auth/mfa/disable` | Bearer + password + code | Turn MFA off |
 | GET / PATCH | `/users/me` | Bearer | My profile |
 | GET | `/audit/me` | Bearer | My audit trail |
+| GET | `/roles` | Bearer | System roles and permissions |
+| POST | `/businesses` | Bearer | Create a business (you become owner) |
+| GET | `/businesses` | Bearer | List my businesses |
+| GET | `/businesses/:businessId` | member | Details, my role and permissions |
+| PATCH | `/businesses/:businessId` | `business.manage` | Edit details and settings |
+| POST | `/businesses/:businessId/status` | `business.manage` | Deactivate, archive, reactivate |
+| GET | `/businesses/:businessId/members` | member | List members |
+| PATCH | `/businesses/:businessId/members/:memberId` | `members.manage` + recent MFA | Change role or grants |
+| DELETE | `/businesses/:businessId/members/:memberId` | `members.manage` + recent MFA | Remove a member |
+| POST | `/businesses/:businessId/invitations` | `members.manage` | Invite (returns the token once) |
+| GET | `/businesses/:businessId/invitations` | `members.manage` | List pending invites |
+| DELETE | `/businesses/:businessId/invitations/:invitationId` | `members.manage` | Revoke an invite |
+| POST | `/invitations/accept` | Bearer | Join with a token |
+| GET | `/businesses/:businessId/audit` | `audit.read` | One business's audit trail |
 
 Outside `/api/v1`: `GET /health`, `GET /health/ready`, `GET /api/docs`.
 
@@ -249,7 +358,7 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 
 ### Test every endpoint with Postman
 
-`postman/Business_OS.postman_collection.json` has 46 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
+`postman/Business_OS.postman_collection.json` has 86 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
 
 **In the Postman app:**
 1. Click **Import** and choose that file.
@@ -259,30 +368,38 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 **From the terminal:**
 
 ```bash
-npx newman run postman/Business_OS.postman_collection.json
+npm run test:postman
 ```
 
-Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. Running it more than about once a minute can hit the login rate limit (`429`).
+Each run registers a new `postman...@example.com` user in whichever database the API is using, and audit rows can't be deleted. Point the API at local Docker if you want to keep Neon clean. One request may wait up to 30 seconds, because each MFA code works only once. A run registers 6 times and sign-ups are limited to 10 per 10 minutes, so a second run soon after gets `429`. On local Docker Redis you can clear the limits with:
 
-## How Phase 1 was verified
+```bash
+docker exec business_os_redis redis-cli flushall
+```
 
-- **72 integration tests pass** against real Postgres and Redis (`npm test`), and the suite passed on repeated runs. They include token reuse, simultaneous refreshes, code replay, forged tokens, CSRF, audit tampering and audit rollback.
-- **All 46 Postman requests pass** (79 checks, run with Newman on a temporary local database).
+## How it was verified
+
+**Phase 2:**
+- **127 integration tests pass** (55 of them new), covering cross-business access, role permissions, invitations, owner protections and lifecycle.
+- **RLS was tested with a role like Neon's owner:** the whole suite also passes on a temporary PostgreSQL 17 database, connected as a non-superuser with `BYPASSRLS` and `CREATEROLE`.
+- **The RLS tests were proven to work:** with RLS switched off on `businesses`, 3 of them fail.
+- **All 86 Postman requests pass**, run with Newman on a temporary local database.
+
+**Phase 1:**
+- **Hard cases are tested:** token reuse, simultaneous refreshes, code replay, forged tokens, CSRF, audit tampering and audit rollback.
 - **The production build was run for real**: register, login, cookie flags and clean shutdown.
-- **Telemetry was checked** against a stand-in collector: traces include HTTP, Express, Prisma and Redis spans, and no password appeared in the data sent.
-- **Sentry was checked** against a stand-in server: an unexpected error is captured, and the client only sees `INTERNAL_ERROR`.
-- **Redis outage was tested**: login still works and `/health/ready` returns 503.
+- **Telemetry and Sentry were checked** against stand-in servers. No password appeared in the data sent.
+- **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
-Not verified:
-- **GitHub Actions has not run**, because this folder is not a git repository yet. The same commands pass locally.
+**Not verified:**
+- **The Phase 2 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17.
+- **GitHub Actions results** have not been checked.
 - **Real Sentry and Grafana accounts** have not been connected.
-- **The Neon migration** has not been applied.
 
 ## What still needs you
 
-1. **Choose the database** for `.env` (see [above](#which-database-does-env-use)).
-2. **Run `git init`** and push to GitHub, so CI starts running.
-3. **Answer the document's open questions** before later phases: hosting target, LLM provider, whether accrual accounting is needed at launch, and which bank and MFS credentials you hold.
+1. **Apply the Phase 2 migration to Neon:** run `npm run db:deploy`, then try one business request in Postman.
+2. **Answer the document's open questions** before later phases: hosting target, LLM provider, whether accrual accounting is needed at launch, and which bank and MFS credentials you hold.
 
 ## Differences from the architecture document
 
@@ -291,6 +408,9 @@ Not verified:
 |---|---|---|
 | `repository`, `policies`, `events`, `index.ts`, `__tests__` in each module | Only router, controller, service, validation, interface | Your instruction. Services call Prisma directly, and tests live in `tests/` |
 | `src/modules`, `src/infrastructure`, `src/shared` | `src/app/modules`, `src/lib`, `src/app/utils` | Follows the skeleton you had already started |
+| A separate login for the app's database role | One login that switches to `business_os_app` inside business transactions | Login and sign-up need access RLS would block, and this needs no second password |
+| Accountant "read own" audit | Uses `GET /audit/me` | Every user already has it, so no extra permission is needed |
+| `X-Business-Id` header mentioned in one diagram | Business id in the URL | The document's other sections use the URL, and it keeps routes explicit |
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
 | Progressive login delay | Fixed lockout after 5 failures | Simpler, and it covers the same threat |
@@ -298,7 +418,13 @@ Not verified:
 **Moved to a later phase:**
 | Item | Phase | Why |
 |---|---|---|
-| Separate database role without UPDATE/DELETE, plus RLS | 2 | Arrives with the RLS work. Until then, triggers protect the audit table |
+| Invitation emails | 6 | Needs email delivery. The token is returned to the inviter for now |
+| Business setup: categories and Cash account | 3 | Added inside `businessesService.create`, in the same transaction |
+| Business setup: chart of accounts and fiscal periods | 4 | Same place |
+| Blocking a base currency change once journals are posted | 4 | No journals exist yet. Until then the change is allowed; a comment marks the spot |
+| Approval threshold being enforced | 4 | The setting is stored now; transactions arrive later |
+| Consolidated "all businesses" endpoints | 5 | Listed under Analytics in the roadmap |
+| Plan limits and custom roles | SaaS | The tables already allow custom roles; no endpoint yet |
 | Lockout and token-reuse emails, password reset | 6 | Needs email delivery. Until then these events go to the security log and audit |
 | Nightly audit check | 6 | Needs BullMQ. Run `npm run audit:verify` by hand until then |
 | `worker.ts` and the outbox | 3–6 | Nothing needs background work yet |
@@ -307,6 +433,6 @@ Not verified:
 
 **Known gap:** the document has no MFA recovery codes. Since password reset also waits for Phase 6, a user who loses their authenticator today can only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
-## Before Phase 2
+## Before Phase 3
 
-Phase 2 adds businesses, members, roles and permissions, the business context middleware and PostgreSQL RLS with tests proving cross-business reads fail. The `business_id` column on `audit_logs` is already in place for it.
+Phase 3 adds financial accounts (Cash, bank, bKash, Nagad, custom), categories, transaction APIs with idempotency and duplicate detection, and signed document uploads. Every new table follows [How to add a new module](#how-to-add-a-new-module-use-this-in-every-phase).

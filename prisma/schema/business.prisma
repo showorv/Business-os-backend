@@ -1,0 +1,125 @@
+enum BusinessType {
+    RETAIL
+    SERVICES
+    AGENCY
+    ECOMMERCE
+    MANUFACTURING
+    CUSTOM
+}
+
+enum BusinessStatus {
+    ACTIVE
+    INACTIVE
+    ARCHIVED
+}
+
+enum MemberStatus {
+    ACTIVE
+    REMOVED
+}
+
+model Business {
+    id                   String         @id @default(uuid(7)) @db.Uuid
+    workspaceId          String         @map("workspace_id") @db.Uuid
+    name                 String
+    legalName            String?        @map("legal_name")
+    taxId                String?        @map("tax_id")
+    // Only picks the starting templates (Phases 3-4). It never changes after creation.
+    type                 BusinessType
+    baseCurrency         String         @map("base_currency") @db.Char(3)
+    fiscalYearStartMonth Int            @map("fiscal_year_start_month") @db.SmallInt
+    timezone             String
+    status               BusinessStatus @default(ACTIVE)
+    // Shape is defined by businessSettings in businesses.validation.ts.
+    settings             Json
+    createdBy            String         @map("created_by") @db.Uuid
+    createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    workspace   Workspace        @relation(fields: [workspaceId], references: [id])
+    creator     User             @relation("BusinessCreator", fields: [createdBy], references: [id])
+    members     BusinessMember[]
+    invitations Invitation[]
+
+    @@index([workspaceId])
+    @@map("businesses")
+}
+
+model BusinessMember {
+    id               String       @id @default(uuid(7)) @db.Uuid
+    workspaceId      String       @map("workspace_id") @db.Uuid
+    businessId       String       @map("business_id") @db.Uuid
+    userId           String       @map("user_id") @db.Uuid
+    roleId           String       @map("role_id") @db.Uuid
+    status           MemberStatus @default(ACTIVE)
+    // Optional grants on top of the role, e.g. finance.read for a Manager.
+    extraPermissions String[]     @map("extra_permissions")
+    createdBy        String       @map("created_by") @db.Uuid
+    createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business Business @relation(fields: [businessId], references: [id])
+    user     User     @relation(fields: [userId], references: [id])
+    role     Role     @relation(fields: [roleId], references: [id])
+
+    @@unique([businessId, userId])
+    @@index([userId])
+    @@map("business_members")
+}
+
+model Invitation {
+    id          String    @id @default(uuid(7)) @db.Uuid
+    workspaceId String    @map("workspace_id") @db.Uuid
+    businessId  String    @map("business_id") @db.Uuid
+    email       String    @db.Citext
+    roleId      String    @map("role_id") @db.Uuid
+    tokenHash   String    @unique @map("token_hash")
+    expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
+    acceptedAt  DateTime? @map("accepted_at") @db.Timestamptz(3)
+    revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(3)
+    createdBy   String    @map("created_by") @db.Uuid
+    createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+    updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+    business Business @relation(fields: [businessId], references: [id])
+    role     Role     @relation(fields: [roleId], references: [id])
+
+    @@index([businessId, email])
+    @@map("invitations")
+}
+
+// Roles are rows, so custom roles in SaaS mode need no code change.
+// workspaceId = null means a built-in system role.
+model Role {
+    id          String    @id @default(uuid(7)) @db.Uuid
+    workspaceId String?   @map("workspace_id") @db.Uuid
+    key         String
+    createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+    workspace   Workspace?       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+    permissions RolePermission[]
+    members     BusinessMember[]
+    invitations Invitation[]
+
+    @@unique([workspaceId, key])
+    @@map("roles")
+}
+
+model Permission {
+    key String @id
+
+    roles RolePermission[]
+
+    @@map("permissions")
+}
+
+model RolePermission {
+    roleId        String @map("role_id") @db.Uuid
+    permissionKey String @map("permission_key")
+
+    role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+    permission Permission @relation(fields: [permissionKey], references: [key])
+
+    @@id([roleId, permissionKey])
+    @@map("role_permissions")
+}

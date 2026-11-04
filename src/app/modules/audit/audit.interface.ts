@@ -24,3 +24,4 @@ export interface ChainVerification {
 }
 
 export type IListAuditQuery = z.infer<typeof auditValidation.listQuery>;
+export type IListBusinessAuditQuery = z.infer<typeof auditValidation.businessListQuery>;

@@ -11,4 +11,9 @@ const listQuery = z.object({
     .optional(),
 });
 
-export const auditValidation = { listQuery };
+const businessListQuery = listQuery.extend({
+  actorUserId: z.uuid().optional(),
+  action: z.string().max(100).optional(),
+});
+
+export const auditValidation = { listQuery, businessListQuery };

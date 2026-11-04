@@ -78,7 +78,7 @@ describe("OpenAPI", () => {
     const res = await api().get("/api/docs/openapi.json");
     expect(res.status).toBe(200);
     expect(Object.keys(res.body.paths)).toEqual(
-      expect.arrayContaining(["/api/v1/auth/login", "/api/v1/auth/mfa/verify", "/api/v1/users/me", "/api/v1/audit/me"]),
+      expect.arrayContaining(["/api/v1/auth/login", "/api/v1/auth/mfa/verify", "/api/v1/users/me", "/api/v1/audit/me", "/api/v1/businesses/{businessId}/members/{memberId}"]),
     );
   });
 });

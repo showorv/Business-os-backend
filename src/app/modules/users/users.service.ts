@@ -43,6 +43,17 @@ const findByEmail = (email: string) =>
 
 const findById = (id: string) => prisma.user.findUnique({ where: { id }, include: { workspaces: true } });
 
+const findPublicByIds = (ids: string[]) =>
+  prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true, email: true } });
+
+// Someone invited into another owner's business also joins that workspace, without it becoming their default.
+const addToWorkspace = (tx: Prisma.TransactionClient, userId: string, workspaceId: string) =>
+  tx.userWorkspace.upsert({
+    where: { userId_workspaceId: { userId, workspaceId } },
+    create: { userId, workspaceId, isDefault: false },
+    update: {},
+  });
+
 const defaultWorkspaceId = (user: { workspaces: { workspaceId: string; isDefault: boolean }[] }) => {
   const workspace = user.workspaces.find((item) => item.isDefault) ?? user.workspaces[0];
   if (!workspace) throw new Error("user has no workspace");
@@ -92,6 +103,8 @@ export const usersService = {
   createWithWorkspace,
   findByEmail,
   findById,
+  findPublicByIds,
+  addToWorkspace,
   defaultWorkspaceId,
   recordLogin,
   setMfaEnabled,

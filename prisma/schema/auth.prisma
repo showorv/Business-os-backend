@@ -27,6 +27,9 @@ model User {
     sessions      UserSession[]
     refreshTokens RefreshToken[]
 
+    createdBusinesses Business[]       @relation("BusinessCreator")
+    memberships       BusinessMember[]
+
     @@map("users")
 }
 

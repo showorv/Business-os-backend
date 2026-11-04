@@ -69,3 +69,29 @@ export const enableMfa = async (session: Session, password = PASSWORD) => {
   if (confirm.status !== 200) throw new Error(`mfa confirm failed: ${JSON.stringify(confirm.body)}`);
   return secret;
 };
+
+export const createBusiness = async (owner: Session, name = "Acme Traders") => {
+  const res = await api()
+    .post(`${API}/businesses`)
+    .set("Authorization", bearer(owner))
+    .send({ name, type: "RETAIL" });
+  if (res.status !== 201) throw new Error(`create business failed: ${JSON.stringify(res.body)}`);
+  return res.body.data as { id: string; workspaceId: string; name: string };
+};
+
+// Registers a new user and brings them into the business with this role.
+export const addMember = async (owner: Session, businessId: string, roleKey: string) => {
+  const member = await registerUser();
+  const invite = await api()
+    .post(`${API}/businesses/${businessId}/invitations`)
+    .set("Authorization", bearer(owner))
+    .send({ email: member.email, roleKey });
+  if (invite.status !== 201) throw new Error(`invite failed: ${JSON.stringify(invite.body)}`);
+
+  const accepted = await api()
+    .post(`${API}/invitations/accept`)
+    .set("Authorization", bearer(member))
+    .send({ token: invite.body.data.token });
+  if (accepted.status !== 200) throw new Error(`accept failed: ${JSON.stringify(accepted.body)}`);
+  return { ...member, memberId: accepted.body.data.memberId as string };
+};

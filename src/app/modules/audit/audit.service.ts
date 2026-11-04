@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import type { Prisma } from "../../../lib/prisma.js";
 import { prisma } from "../../../lib/prisma.js";
-import type { AuditEntry, ChainVerification, IListAuditQuery } from "./audit.interface.js";
+import { withBusinessScope } from "../../../lib/rls.js";
+import type { BusinessContext } from "../members/members.interface.js";
+import type { AuditEntry, ChainVerification, IListAuditQuery, IListBusinessAuditQuery } from "./audit.interface.js";
 
 const SYSTEM_CHAIN = "system";
 
@@ -58,11 +60,9 @@ const record = async (tx: Prisma.TransactionClient, entry: AuditEntry) => {
   const chain = workspaceId ?? SYSTEM_CHAIN;
   await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${chain}, 0))`;
 
-  const previous = await tx.auditLog.findFirst({
-    where: { workspaceId },
-    orderBy: { id: "desc" },
-    select: { rowHash: true },
-  });
+  // Through a database function: RLS may hide the row at the head of the chain from this transaction.
+  const [head] = await tx.$queryRaw<{ hash: Uint8Array | null }[]>`
+    SELECT audit_chain_head(${workspaceId}::uuid) AS hash`;
 
   const row: HashInput = {
     workspaceId,
@@ -79,7 +79,7 @@ const record = async (tx: Prisma.TransactionClient, entry: AuditEntry) => {
     at: new Date(),
   };
 
-  const prevHash = previous?.rowHash ?? null;
+  const prevHash = head?.hash ?? null;
   const rowHash = computeHash(prevHash, row);
 
   await tx.auditLog.create({
@@ -93,33 +93,74 @@ const record = async (tx: Prisma.TransactionClient, entry: AuditEntry) => {
   });
 };
 
+// The usual call inside a business transaction: fills in who and where from the business context.
+const recordForBusiness = (
+  tx: Prisma.TransactionClient,
+  business: BusinessContext,
+  entry: Omit<AuditEntry, "workspaceId" | "businessId" | "actorUserId">,
+) =>
+  record(tx, {
+    ...entry,
+    workspaceId: business.workspaceId,
+    businessId: business.businessId,
+    actorUserId: business.userId,
+  });
+
 // For events with no other change to commit, such as a failed login.
 const recordStandalone = (entry: AuditEntry) => prisma.$transaction((tx) => record(tx, entry));
 
-const listForActor = async (userId: string, query: IListAuditQuery) => {
-  const rows = await prisma.auditLog.findMany({
-    where: { actorUserId: userId, ...(query.cursor ? { id: { lt: BigInt(query.cursor) } } : {}) },
-    orderBy: { id: "desc" },
-    take: query.limit + 1,
-    select: {
-      id: true,
-      action: true,
-      entityType: true,
-      entityId: true,
-      before: true,
-      after: true,
-      ip: true,
-      actorVia: true,
-      requestId: true,
-      at: true,
-    },
-  });
+const LIST_FIELDS = {
+  id: true,
+  actorUserId: true,
+  action: true,
+  entityType: true,
+  entityId: true,
+  before: true,
+  after: true,
+  ip: true,
+  actorVia: true,
+  requestId: true,
+  at: true,
+} as const;
 
-  const page = rows.slice(0, query.limit);
+type AuditRow = Prisma.AuditLogGetPayload<{ select: typeof LIST_FIELDS }>;
+
+// Fetch limit + 1 rows: the extra one only says whether another page exists.
+const toPage = (rows: AuditRow[], limit: number) => {
+  const page = rows.slice(0, limit);
   return {
     items: page.map((row) => ({ ...row, id: row.id.toString() })),
-    nextCursor: rows.length > query.limit ? page.at(-1)!.id.toString() : null,
+    nextCursor: rows.length > limit ? page.at(-1)!.id.toString() : null,
   };
+};
+
+const beforeCursor = (cursor?: string) => (cursor ? { id: { lt: BigInt(cursor) } } : {});
+
+const listForActor = async (userId: string, query: IListAuditQuery) => {
+  const rows = await prisma.auditLog.findMany({
+    where: { actorUserId: userId, ...beforeCursor(query.cursor) },
+    orderBy: { id: "desc" },
+    take: query.limit + 1,
+    select: LIST_FIELDS,
+  });
+  return toPage(rows, query.limit);
+};
+
+const listForBusiness = async (business: BusinessContext, query: IListBusinessAuditQuery) => {
+  const rows = await withBusinessScope(business, (tx) =>
+    tx.auditLog.findMany({
+      where: {
+        businessId: business.businessId,
+        ...(query.actorUserId ? { actorUserId: query.actorUserId } : {}),
+        ...(query.action ? { action: query.action } : {}),
+        ...beforeCursor(query.cursor),
+      },
+      orderBy: { id: "desc" },
+      take: query.limit + 1,
+      select: LIST_FIELDS,
+    }),
+  );
+  return toPage(rows, query.limit);
 };
 
 const verifyChain = async (workspaceId: string | null): Promise<ChainVerification> => {
@@ -170,4 +211,12 @@ const verifyAllChains = async () => {
   return Promise.all(chains.map(({ workspaceId }) => verifyChain(workspaceId)));
 };
 
-export const auditService = { record, recordStandalone, listForActor, verifyChain, verifyAllChains };
+export const auditService = {
+  record,
+  recordForBusiness,
+  recordStandalone,
+  listForActor,
+  listForBusiness,
+  verifyChain,
+  verifyAllChains,
+};

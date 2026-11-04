@@ -16,7 +16,9 @@
     "db:deploy": "prisma migrate deploy",
     "db:status": "prisma migrate status",
     "audit:verify": "tsx src/scripts/verify-audit.ts",
-    "postinstall": "prisma skills sync || exit 0"
+    "postinstall": "prisma skills sync || exit 0",
+    "postman:build": "node postman/generate-collection.mjs",
+    "test:postman": "newman run postman/Business_OS.postman_collection.json"
   },
   "keywords": [],
   "author": "",
@@ -67,6 +69,7 @@
     "@types/supertest": "^7.2.1",
     "@types/swagger-ui-express": "^4.1.8",
     "eslint": "^10.14.0",
+    "newman": "^6.2.3",
     "pino-pretty": "^13.2.0",
     "prisma": "^7.10.1",
     "supertest": "^7.3.1",
