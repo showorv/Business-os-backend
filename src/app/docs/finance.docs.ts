@@ -50,6 +50,9 @@ const transaction = z.object({
   source: z.string(),
   possibleDuplicate: z.boolean(),
   duplicateOfId: z.uuid().nullable(),
+  journalEntryId: z.uuid().nullable(),
+  reversalEntryId: z.uuid().nullable(),
+  approvedBy: z.uuid().nullable(),
 });
 
 const accounts = "/businesses/{businessId}/accounts";
@@ -70,6 +73,10 @@ addPath("Transactions", { method: "get", path: transactions, summary: "List with
 addPath("Transactions", { method: "get", path: `${transactions}/{transactionId}`, summary: "Get one, with attachments. Needs finance.read", params: transactionParams, response: transaction.extend({ attachments: z.array(z.object({ documentId: z.uuid(), createdAt: z.string() })) }) });
 addPath("Transactions", { method: "patch", path: `${transactions}/{transactionId}`, summary: "Edit a draft. Needs finance.write", params: transactionParams, body: transactionsValidation.update, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/void`, summary: "Void a draft. It is kept, not deleted. Needs finance.write", params: transactionParams, response: transaction });
+addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/post`, summary: "Post a draft to the ledger, or send it for approval if above the threshold. Needs ledger.post", params: transactionParams, response: transaction });
+addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/approve`, summary: "Approve and post. Must be someone other than the creator. Needs transactions.approve", params: transactionParams, response: transaction });
+addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/reject`, summary: "Reject a pending transaction. Needs transactions.approve", params: transactionParams, response: transaction });
+addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/reverse`, summary: "Reverse a posted transaction with a mirror-image journal. Needs ledger.reverse", params: transactionParams, body: transactionsValidation.reverse, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/dismiss-duplicate`, summary: "Mark a flagged transaction as not a duplicate. Needs finance.write", params: transactionParams, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/attachments`, summary: "Attach an uploaded document. Needs finance.write", params: transactionParams, body: transactionsValidation.attach });
 addPath("Transactions", { method: "delete", path: `${transactions}/{transactionId}/attachments/{documentId}`, summary: "Remove an attachment. Needs finance.write", params: attachmentParams });

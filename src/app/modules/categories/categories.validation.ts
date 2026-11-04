@@ -6,11 +6,17 @@ const categoryType = z.enum(["INCOME", "EXPENSE"]);
 
 const categoryParams = z.object({ categoryId: z.uuid() });
 
-const create = z.object({ type: categoryType, name: textField(120), nameBn: textField(120).optional() });
+// Without a ledgerAccountId, the category gets its own new ledger account.
+const create = z.object({
+  type: categoryType,
+  name: textField(120),
+  nameBn: textField(120).optional(),
+  ledgerAccountId: z.uuid().optional(),
+});
 
 // `type` is left out: past transactions depend on it.
 const update = z
-  .object({ name: textField(120), nameBn: textField(120).nullable(), isActive: z.boolean() })
+  .object({ name: textField(120), nameBn: textField(120).nullable(), isActive: z.boolean(), ledgerAccountId: z.uuid() })
   .partial()
   .refine((body) => Object.keys(body).length > 0, { message: "NO_FIELDS_TO_UPDATE" });
 

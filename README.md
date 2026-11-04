@@ -8,9 +8,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 |---|---|---|
 | 1 | Foundation & auth | ✅ Done |
 | 2 | Multi-business (businesses, members, RBAC, RLS) | ✅ Done |
-| **3** | **Accounts & transactions** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 4 | Double-entry ledger | ⬜ Next |
-| 5 | Analytics & reports | ⬜ |
+| 3 | Accounts & transactions | ✅ Done |
+| **4** | **Double-entry ledger** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
+| 5 | Analytics & reports | ⬜ Next |
 | 6 | Tasks & reminders (BullMQ, email) | ⬜ |
 | 7 | Integrations (bKash, banks, CSV) | ⬜ |
 | 8 | AI & RAG | ⬜ |
@@ -85,6 +85,7 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run db:status` | Shows which migrations are applied |
 | `npm run db:provision` | Gives older businesses any starting data added since they were created. Safe to repeat |
 | `npm run audit:verify` | Checks the audit hash chain; exits with 1 if it finds tampering |
+| `npm run ledger:verify` | Checks every journal balances and every cached balance matches the ledger; exits with 1 if not |
 | `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
 | `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
 
@@ -96,15 +97,15 @@ src/
 ├── app.ts                 Express app: the middleware order lives here
 ├── instrument.ts          OpenTelemetry + Sentry, loaded before everything else
 ├── lib/                   prisma, redis, logger, storage (S3), rls (the business transaction helper)
-├── scripts/               verify-audit, provision-businesses
+├── scripts/               verify-audit, verify-ledger, provision-businesses
 ├── types/express.d.ts     Adds req.auth, req.requestId, req.validated
 └── app/
     ├── config/            env.config.ts (validated environment)
-    ├── constants/         permissions, categoryTemplates
+    ├── constants/         permissions, categoryTemplates, chartOfAccounts
     ├── routes/index.ts    Module registry: a new module = one line here
     ├── docs/              Swagger spec: registry, openapi and one *.docs.ts per area
     ├── middlewares/       requestId, requestLogger, rateLimit, auth, businessContext, csrf, validate, errorHandler
-    ├── utils/             errors, money, dates, pagination, idempotency, jwt, cookies, crypto, lockout...
+    ├── utils/             errors, money, dates, pagination, idempotency, postingRules, sequences, jwt...
     └── modules/
         ├── auth/          auth.router / controller / service / validation / interface
         ├── users/         same five files
@@ -116,9 +117,14 @@ src/
         ├── accounts/      same five files
         ├── categories/    same five files
         ├── documents/     same five files
-        └── transactions/  same five files
+        ├── transactions/  same five files
+        ├── ledger-accounts/  same five files (chart of accounts)
+        ├── fiscal-periods/   same five files
+        ├── journals/         same five files (the posting engine)
+        ├── reports/          same five files
+        └── reconciliations/  same five files
 prisma/
-├── schema/                schema, workspace, auth, business, finance, document and audit models
+├── schema/                schema, workspace, auth, business, finance, ledger, document and audit models
 └── migrations/
 postman/                   Collection and the script that generates it
 tests/                     Integration tests against real Postgres and Redis
@@ -172,13 +178,176 @@ requireAuth              who are you?
 
 **Shared helpers to reuse:** `minorAmountField` for money, `dateField` for dates, `paginationQuery` with `pageArgs` and `toPage` for lists, and `withIdempotency` for create requests that clients may retry.
 
+**Anything that changes money:** never write to `journal_entries` directly. Call `journalsService.post(tx, business, ...)` inside your transaction. **A new transaction type** adds one rule in `src/app/utils/postingRules.ts`.
+
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
 
+## What was built in Phase 4
+
+**The goal:** real double-entry books. Every money movement becomes a balanced journal, posted journals never change, and every report is read from them. This is the document's critical gate: analytics, budgets, integrations and AI all build on it.
+
+**Accounting decision:** the ledger is accrual-ready, but recording is cash-style for now. Receivable and Payable accounts exist, and unpaid invoices or bills can be entered as manual journals, but there's no invoice module yet. Adding one later needs no data migration.
+
+### How double-entry works
+
+Every entry has at least one debit (Dr) and one credit (Cr), and **total debits always equal total credits**. Each account type grows on one side:
+
+| Account type | Grows with | Example |
+|---|---|---|
+| Asset | Debit | Cash, bank, bKash, money customers owe you |
+| Expense | Debit | Rent, salaries |
+| Liability | Credit | Money you owe suppliers |
+| Equity | Credit | Owner's capital |
+| Revenue | Credit | Sales |
+
+### One month, with real entries
+
+Take a new business with a fresh Cash account. Amounts are in taka here; the API stores paisa, so ৳30,000 is `"3000000"`.
+
+| # | What happened | Dr | Cr | Amount |
+|---|---|---|---|---|
+| 1 | Opened a City Bank account with an existing ৳50,000 | 1110 City Bank | 3900 Opening Balance Equity | 50,000 |
+| 2 | Owner puts in capital | 1110 City Bank | 3000 Owner's Equity | 100,000 |
+| 3 | Cash sale into the bank | 1110 City Bank | 4000 Sales Revenue | 40,000 |
+| 4 | Rent paid from the bank | 6100 Rent Expense | 1110 City Bank | 30,000 |
+| 5 | Moved money from bank to bKash, ৳185 fee | 1130 bKash Wallet | 1110 City Bank | 10,000 |
+|   | The fee, in the same journal | 6500 Bank & MFS Charges | 1110 City Bank | 185 |
+| 6 | Refund to a customer from bKash | 4900 Sales Returns | 1130 bKash Wallet | 2,000 |
+| 7 | Invoice issued, not paid yet (manual journal) | 1200 Accounts Receivable | 4000 Sales Revenue | 20,000 |
+
+**Trial balance**, the proof that it balances:
+
+| Account | Debit | Credit |
+|---|---|---|
+| 1110 City Bank | 149,815 | |
+| 1130 bKash Wallet | 8,000 | |
+| 1200 Accounts Receivable | 20,000 | |
+| 3000 Owner's Equity | | 100,000 |
+| 3900 Opening Balance Equity | | 50,000 |
+| 4000 Sales Revenue | | 60,000 |
+| 4900 Sales Returns | 2,000 | |
+| 6100 Rent Expense | 30,000 | |
+| 6500 Bank & MFS Charges | 185 | |
+| **Total** | **210,000** | **210,000** |
+
+**Profit & loss:** Revenue 58,000 (60,000 less 2,000 returns) − Expenses 30,185 = **net profit ৳27,815**. The ৳10,000 transfer isn't in it, because it only moved money between your own accounts.
+
+**Balance sheet:** Assets 177,815 = Liabilities 0 + Equity 150,000 + unclosed profit 27,815.
+
+**Cash flow:**
+
+| Activity | Amount | Why |
+|---|---|---|
+| Operating | +7,815 | Sale +40,000, rent −30,000, fee −185, refund −2,000 |
+| Investing | 0 | |
+| Financing | +100,000 | Capital |
+| Opening balances | +50,000 | Reported separately |
+| **Cash at the end** | **157,815** | City Bank 149,815 + bKash 8,000 |
+
+Profit is ৳27,815 but operating cash is only ৳7,815. The ৳20,000 gap is the unpaid invoice, which is why the document wants both shown.
+
+**Correcting a mistake:** suppose the rent in step 4 was wrong. Nothing gets edited. `POST /transactions/:id/reverse` adds a mirror image:
+
+| Entry | Dr | Cr | Amount |
+|---|---|---|---|
+| Original (stays forever) | 6100 Rent Expense | 1110 City Bank | 30,000 |
+| Reversal (new) | 1110 City Bank | 6100 Rent Expense | 30,000 |
+
+**Closing the year:** suppose this was the whole year. The closing entry empties revenue and expense, and moves the profit to Retained Earnings, so next year starts at zero:
+
+| Dr | Cr | Amount |
+|---|---|---|
+| 4000 Sales Revenue | | 60,000 |
+| | 4900 Sales Returns | 2,000 |
+| | 6100 Rent Expense | 30,000 |
+| | 6500 Bank & MFS Charges | 185 |
+| | 3200 Retained Earnings | 27,815 |
+
+The closed year's P&L still shows ৳27,815, because the report leaves closing entries out.
+
+### Step 1. Tables
+| Table | Purpose |
+|---|---|
+| `ledger_accounts` | The chart of accounts, in English and Bangla. Each business owns its copy |
+| `fiscal_periods` | Twelve monthly periods per year: `OPEN`, `SOFT_CLOSED` or `CLOSED` |
+| `journal_entries`, `journal_lines` | The books. Append-only |
+| `reconciliations`, `reconciliation_lines` | Statements checked against the books |
+
+All are protected by RLS. Each financial account links to its own asset account, and each category to a revenue or expense account.
+
+### Step 2. The posting engine
+`journalsService.post()` in `src/app/modules/journals/journals.service.ts` is **the only code that writes to the ledger**. Inside the caller's transaction it checks the balance, finds the open period, gives the entry a number like `JE-2026-000001`, writes the lines and updates the account's cached balance.
+
+### Step 3. Posting rules
+`src/app/utils/postingRules.ts` says how each transaction type becomes lines. They are pure functions, so they can be tested with thousands of random inputs.
+
+| Type | Dr | Cr |
+|---|---|---|
+| `INCOME` | The account | The category's revenue account |
+| `EXPENSE` | The category's expense account | The account |
+| `TRANSFER` | Destination account | Source account |
+| Transfer fee | 6500 Bank & MFS Charges | Source account |
+| `REFUND` | 4900 Sales Returns | The account |
+| `ADJUSTMENT` | Same as income or expense, by its category's type | |
+
+Owner capital, drawings, unpaid invoices and bills are manual journals through `POST /journals`.
+
+### Step 4. The transaction lifecycle
+```
+DRAFT ──post──> POSTED ──reverse──> VOID
+  │               ▲
+  │             approve (a second person)
+  │               │
+  └──post──> PENDING_APPROVAL ──reject──> REJECTED     (expense above the threshold)
+```
+
+Only posting changes the books, so drafts never appear in a report. `postNow: true` on create does both steps in one request. `approvalThresholdMinor` in the business settings turns on approval, and whoever entered a transaction can't approve it. A sole owner should leave it unset, or they'd have no one to approve.
+
+### Step 5. The books protect themselves
+These are enforced by PostgreSQL, so even buggy code can't get past them:
+
+| Rule | How |
+|---|---|
+| Debits equal credits, with at least 2 lines | Trigger checked at `COMMIT` |
+| Each line has exactly one positive side | Check constraint |
+| Journals can't be changed or deleted | Triggers, even for the table owner, and the app role has no `UPDATE` or `DELETE` |
+| No posting into a closed period, or outside its dates | Trigger |
+| No account from another business | Trigger, plus RLS |
+
+### Step 6. Fiscal periods
+| Status | Who can post |
+|---|---|
+| `OPEN` | Anyone with `ledger.post` |
+| `SOFT_CLOSED` | Only owners and admins |
+| `CLOSED` | Nobody, and it can't reopen |
+
+Months close in order. Closing needs `period.close` and recent MFA. The next fiscal year opens by itself when something is posted into it, up to a year ahead. Older years must be opened with `POST /fiscal-periods/years`. A correction to a closed month is a reversal dated in the current one.
+
+`POST /fiscal-periods/years/:fiscalYear/close` needs every period in the year soft-closed or closed. It posts the closing entry, closes the year and opens the next.
+
+### Step 7. Reports
+All read journals only, and each states its dates, currency and `POSTED_ACTUALS`. Every report also returns `balanced`, so a problem shows up in the data.
+
+| Report | Answers |
+|---|---|
+| Trial balance | Do debits equal credits at this date? |
+| Profit & loss | Revenue minus expenses for a range |
+| Balance sheet | Assets = Liabilities + Equity at a date |
+| Cash flow | Where cash came from and went, by operating, investing and financing |
+
+### Step 8. Reconciliation
+Checks a statement against the books. Start one with the statement's balance, match journal lines to it, and watch the difference fall to zero. It only closes at zero, or with `adjust: true`, which books the rest to 6900 and needs `transactions.approve`. Matches are stored in their own table, because journal lines can't change. Phase 7 will feed it from imported statements.
+
+### Step 9. Locks that protect the numbers
+- The **fiscal year start month** can't change after creation, because periods are built around it.
+- The **base currency** can't change once a journal exists.
+- The **opening balance** is now a real journal: Dr the account, Cr 3900.
+
 ## What was built in Phase 3
 
-**The goal:** record where money lives and what happened to it, as safe, validated **drafts**. Nothing touches the books yet: posting to the ledger is Phase 4.
+**The goal:** record where money lives and what happened to it, as safe, validated **drafts**. Phase 4 then posts them to the ledger.
 
 ### Step 1. Tables
 | Table | Purpose |
@@ -200,10 +369,10 @@ All money is a whole number of minor units (paisa for BDT), stored as `BIGINT`, 
 Creating a business now also creates a Cash account and starting categories for its type, in the same transaction. For businesses that already existed, run `npm run db:provision`.
 
 ### Step 4. Financial accounts
-Accounts are never deleted, only deactivated. Only the last 4 digits of an account number are stored (`****9012`). The opening balance can't be edited after creation, because in Phase 4 it becomes a posted journal.
+Accounts are never deleted, only deactivated. Only the last 4 digits of an account number are stored (`****9012`). The opening balance can't be edited after creation, because it's a posted journal.
 
 ### Step 5. Transactions
-Everything is created as a `DRAFT` with its own number. Drafts can be edited or voided, never deleted. These rules apply on both create and edit:
+Everything starts as a `DRAFT` with its own number. Drafts can be edited or voided, never deleted. These rules apply on both create and edit:
 
 | Rule | Error code |
 |---|---|
@@ -419,6 +588,10 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | POST / GET | `/businesses/:businessId/transactions` | `finance.write` / `finance.read` | Create a draft or list with filters |
 | GET / PATCH | `/businesses/:businessId/transactions/:transactionId` | `finance.read` / `finance.write` | Read or edit a draft |
 | POST | `.../transactions/:transactionId/void` | `finance.write` | Void a draft |
+| POST | `.../transactions/:transactionId/post` | `ledger.post` | Post to the ledger, or send for approval |
+| POST | `.../transactions/:transactionId/approve` | `transactions.approve` | Approve and post |
+| POST | `.../transactions/:transactionId/reject` | `transactions.approve` | Reject |
+| POST | `.../transactions/:transactionId/reverse` | `ledger.reverse` | Reverse with a mirror-image journal |
 | POST | `.../transactions/:transactionId/dismiss-duplicate` | `finance.write` | Clear a duplicate flag |
 | POST | `.../transactions/:transactionId/attachments` | `finance.write` | Attach a document |
 | DELETE | `.../transactions/:transactionId/attachments/:documentId` | `finance.write` | Remove an attachment |
@@ -427,6 +600,24 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | GET | `/businesses/:businessId/documents` | `documents.read` | List documents |
 | GET | `/businesses/:businessId/documents/:documentId/download` | `documents.read` | Get a download link |
 | DELETE | `/businesses/:businessId/documents/:documentId` | `documents.write` | Soft delete |
+| GET / POST | `/businesses/:businessId/ledger-accounts` | `finance.read` / `ledger.post` | List or add accounts |
+| PATCH | `.../ledger-accounts/:ledgerAccountId` | `ledger.post` | Edit an account |
+| GET | `/businesses/:businessId/fiscal-periods` | `finance.read` | List periods |
+| POST | `.../fiscal-periods/years` | `period.close` | Open a fiscal year |
+| POST | `.../fiscal-periods/:periodId/status` | `period.close` + recent MFA | Soft-close, close or reopen |
+| POST | `.../fiscal-periods/years/:fiscalYear/close` | `period.close` + recent MFA | Year-end close |
+| GET / POST | `/businesses/:businessId/journals` | `finance.read` / `ledger.post` | List, or post a manual journal |
+| GET | `.../journals/:journalId` | `finance.read` | A journal with its Dr and Cr lines |
+| POST | `.../journals/:journalId/reverse` | `ledger.reverse` | Reverse a manual journal |
+| GET | `.../reports/trial-balance?asOf=` | `finance.read` | Trial balance |
+| GET | `.../reports/profit-and-loss?from=&to=` | `finance.read` | Profit & loss |
+| GET | `.../reports/balance-sheet?asOf=` | `finance.read` | Balance sheet |
+| GET | `.../reports/cash-flow?from=&to=` | `finance.read` | Cash flow |
+| GET / POST | `/businesses/:businessId/reconciliations` | `finance.read` / `ledger.post` | List or start |
+| GET | `.../reconciliations/:reconciliationId` | `finance.read` | Difference and unmatched lines |
+| POST | `.../reconciliations/:reconciliationId/lines` | `ledger.post` | Match lines |
+| DELETE | `.../reconciliations/:reconciliationId/lines/:journalLineId` | `ledger.post` | Un-match a line |
+| POST | `.../reconciliations/:reconciliationId/close` | `ledger.post` | Close (`adjust: true` also needs `transactions.approve`) |
 
 Outside `/api/v1`: `GET /health`, `GET /health/ready`, `GET /api/docs`.
 
@@ -444,7 +635,7 @@ curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/us
 
 ### Test every endpoint with Postman
 
-`postman/Business_OS.postman_collection.json` has 123 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
+`postman/Business_OS.postman_collection.json` has 178 requests covering every endpoint, with checks on each response. It saves tokens and generates MFA codes by itself.
 
 **In the Postman app:**
 1. Click **Import** and choose that file.
@@ -465,11 +656,20 @@ docker exec business_os_redis redis-cli flushall
 
 ## How it was verified
 
+**Phase 4 (the gate):**
+- **262 integration tests pass** (68 of them new), including exact Dr and Cr for each posting rule, simultaneous posting, reversals, approvals, period rules, year-end close, all four reports and reconciliation.
+- **Property-based tests with random inputs** (`tests/ledger-properties.test.ts`): 4,000 random postings through the rules, and 15 random sequences of up to 12 transactions and reversals through the real API. After each sequence: debits equal credits, assets equal liabilities plus equity, transfers stay out of profit, cash flow ties out, and cached balances match the ledger.
+- **The database protections were proven real:** the suite passes as a role like Neon's owner, and removing the balance triggers or switching off RLS makes the matching tests fail.
+- **The upgrade was tested on a Phase 3 database with data**, as that same role: the migration applied, `db:provision` linked everything, a second run changed nothing, and `ledger:verify` found no problems.
+- **All 178 Postman requests pass** on the built server, run with Newman on a temporary local database. They reach all 75 documented operations.
+- **The worked example in this README is itself a test**, so its figures can't drift from what the code does.
+- **Timed with Neon-like delay** (260ms per round trip, simulated locally): creating and posting a transaction took about 8.3 seconds, creating a business about 5.4, and a trial balance about 1.6.
+
 **Phase 3:**
 - **194 integration tests pass** (67 of them new), with real file uploads to MinIO. They cover precision on large amounts, simultaneous retries, simultaneous numbering, every transaction rule, fake file types and ids from other businesses.
 - **The suite also passes as a role like Neon's owner**, on a temporary PostgreSQL 17 database. With RLS switched off on `financial_accounts`, the tests fail, as they should.
 - **All 123 Postman requests pass** on the built server, run with Newman on a temporary local database. They reach all 50 documented operations.
-- **Timed with Neon-like delay** (260ms per round trip, simulated locally): creating a transaction takes about 4.5 seconds, a business about 3.8 and a list about 1.6.
+- **Timed with Neon-like delay** (260ms per round trip, simulated locally): creating a draft took about 4.5 seconds, and a list about 1.6.
 
 **Phase 2:**
 - **127 integration tests pass** (55 of them new), covering cross-business access, role permissions, invitations, owner protections and lifecycle.
@@ -484,15 +684,15 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The Phase 3 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. Phase 2's migration did work on Neon.
+- **The Phase 4 migration has not been run on Neon** (PostgreSQL 18). It was tested on PostgreSQL 17. The Phase 2 and 3 migrations did work on Neon.
 - **Cloudflare R2 or S3** have not been tried. Uploads were tested on MinIO only.
 - **GitHub Actions results** have not been checked.
 - **Real Sentry and Grafana accounts** have not been connected.
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision` to give your existing business its Cash account and categories.
-2. **Decide on accrual accounting before Phase 4:** is it needed at launch (invoices, AR/AP), or is cash-basis enough? This is one of the document's open questions, and it shapes the posting rules.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run db:provision`, then `npm run ledger:verify`. Your existing business needs the provision step, or posting returns `BUSINESS_NOT_PROVISIONED`.
+2. **Ask your accountant** whether cash-style recording suits your statutory or tax reports, especially for a registered company.
 3. **Answer the document's other open questions** before later phases: hosting target, LLM provider, and which bank and MFS credentials you hold.
 
 ## Differences from the architecture document
@@ -504,7 +704,10 @@ docker exec business_os_redis redis-cli flushall
 | `src/modules`, `src/infrastructure`, `src/shared` | `src/app/modules`, `src/lib`, `src/app/utils` | Follows the skeleton you had already started |
 | A separate login for the app's database role | One login that switches to `business_os_app` inside business transactions | Login and sign-up need access RLS would block, and this needs no second password |
 | Accountant "read own" audit | Uses `GET /audit/me` | Every user already has it, so no extra permission is needed |
-| Opening balance posts a journal; account row linked to the ledger | `current_balance_minor` starts at the opening balance | The ledger is Phase 4, which replaces this with a real journal |
+| Transfer fee example credits the destination (bKash) | The fee always comes from the source account | One clear rule. To charge the destination instead, post the fee as its own expense |
+| Reconciliation difference on 6900 or 4900 | Always 6900 | 4900 is Sales Returns, so a bank difference shouldn't reduce sales |
+| A `reconciled_at` column on journal lines | A separate `reconciliation_lines` table | Journal lines can't change, by design |
+| Period check when saving a draft | Period check when posting | A draft doesn't touch the books, so it can be saved for any date |
 | `X-Business-Id` header mentioned in one diagram | Business id in the URL | The document's other sections use the URL, and it keeps routes explicit |
 | ESLint rule blocking deep imports through `index.ts` | Not added | There is no `index.ts`. By convention, modules only import each other's services |
 | `minio/minio` image | `cgr.dev/chainguard/minio` | The official image was refused on Docker Hub and Quay (Nov 2026) |
@@ -513,17 +716,19 @@ docker exec business_os_redis redis-cli flushall
 **Moved to a later phase:**
 | Item | Phase | Why |
 |---|---|---|
+| Foreign-currency posting and FX rates | 5 | Accounts in another currency can exist, but posting returns `FOREIGN_CURRENCY_NOT_SUPPORTED`. The journal columns are ready |
+| Transactional outbox and `transaction.posted` events | 5 | Nothing consumes them yet. Rollups can be rebuilt from journals, so nothing is lost |
+| Statement lines, importing and auto-matching | 7 | Reconciliation works by hand until then |
+| Notifying approvers | 6 | Needs notifications. Pending items can be listed with `status=PENDING_APPROVAL` |
+| Nightly `ledger:verify` | 6 | Needs background jobs. Run it by hand until then |
+| Invoices, bills, and receivable and payable tracking | Future | Accrual-ready: the accounts exist, and manual journals work today |
+| Intercompany transfers between your businesses | 5 | The Due To and Due From accounts are seeded. Consolidation is where they matter |
 | Invitation emails | 6 | Needs email delivery. The token is returned to the inviter for now |
-| Business setup: chart of accounts and fiscal periods | 4 | Added in `businessesService.provision` |
-| Approval flow, posting, reversals and the fiscal period check | 4 | Drafts are all that exist until the ledger does |
-| Linking accounts and categories to ledger accounts | 4 | The chart of accounts doesn't exist yet |
 | Malware scanning and OCR | 8 | `scan_status` is `NOT_SCANNED` until the ingestion pipeline exists |
 | Cleaning up abandoned uploads and expired idempotency keys | 6 | Needs background jobs. They do no harm until then |
 | Enforcing `enabledModules` per business | SaaS | The setting is stored, but nothing reads it yet |
-| Blocking a base currency change once journals are posted | 4 | No journals exist yet. Until then the change is allowed; a comment marks the spot |
 | Counterparties (customers and suppliers) | Not in any phase's list | The ER diagram has the table, but no phase includes the module. `counterparty_id` is added when it's built |
 | Custom fields | Not in any phase's list | Section 8.4 describes them, but no phase includes them |
-| Approval threshold being enforced | 4 | The setting is stored now; transactions arrive later |
 | Consolidated "all businesses" endpoints | 5 | Listed under Analytics in the roadmap |
 | Plan limits and custom roles | SaaS | The tables already allow custom roles; no endpoint yet |
 | Lockout and token-reuse emails, password reset | 6 | Needs email delivery. Until then these events go to the security log and audit |
@@ -536,6 +741,6 @@ docker exec business_os_redis redis-cli flushall
 
 **Known gap:** the document has no MFA recovery codes. Since password reset also waits for Phase 6, a user who loses their authenticator today can only be recovered by editing the database. Consider adding recovery codes before relying on MFA in production.
 
-## Before Phase 4
+## Before Phase 5
 
-Phase 4 is the critical gate: chart of accounts templates, journals, the posting engine, fiscal periods, reversals, period close, and the trial balance, P&L, balance sheet and cash flow. Drafts from Phase 3 become `POSTED` there, and analytics, budgets, integrations and AI all wait until its test suite is green.
+The ledger gate is green, so Phases 5, 6 and 7 can start. Phase 5 adds rollups, consolidated "all businesses" APIs, FX conversion, budgets, goals and PDF, Excel and CSV exports, all reading from the ledger.

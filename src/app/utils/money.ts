@@ -12,4 +12,7 @@ export const positiveMinorAmountField = minorAmountField.refine((value) => BigIn
   message: "AMOUNT_MUST_BE_POSITIVE",
 });
 
+// For balances, which can go below zero, such as an overdrawn account on a statement.
+export const signedMinorAmountField = z.string().overwrite(normalizeDigits).trim().regex(/^-?\d{1,18}$/, { abort: true });
+
 export const bigintToString = (_key: string, value: unknown) => (typeof value === "bigint" ? value.toString() : value);

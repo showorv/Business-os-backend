@@ -6,6 +6,7 @@ import "./audit.docs.js";
 import "./businesses.docs.js";
 import "./finance.docs.js";
 import "./documents.docs.js";
+import "./accounting.docs.js";
 import { registry } from "./registry.js";
 
 export const buildOpenApiDocument = () =>

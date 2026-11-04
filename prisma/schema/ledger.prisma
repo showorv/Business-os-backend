@@ -1,0 +1,188 @@
+enum LedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum NormalBalance {
+  DEBIT
+  CREDIT
+}
+
+// Where this account's cash movements appear on the cash flow statement.
+enum CashFlowClass {
+  OPERATING
+  INVESTING
+  FINANCING
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  SOFT_CLOSED
+  CLOSED
+}
+
+enum JournalKind {
+  STANDARD
+  REVERSAL
+  ADJUSTING
+  CLOSING
+  OPENING
+}
+
+enum ReconciliationStatus {
+  OPEN
+  CLOSED
+}
+
+// The chart of accounts. Each business owns its own copy.
+model LedgerAccount {
+  id            String            @id @default(uuid(7)) @db.Uuid
+  workspaceId   String            @map("workspace_id") @db.Uuid
+  businessId    String            @map("business_id") @db.Uuid
+  code          String
+  name          String
+  nameBn        String?           @map("name_bn")
+  type          LedgerAccountType
+  normalBalance NormalBalance     @map("normal_balance")
+  cashFlowClass CashFlowClass     @default(OPERATING) @map("cash_flow_class")
+  parentId      String?           @map("parent_id") @db.Uuid
+  isSystem      Boolean           @default(false) @map("is_system")
+  isActive      Boolean           @default(true) @map("is_active")
+  createdBy     String            @map("created_by") @db.Uuid
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business         Business          @relation(fields: [businessId], references: [id])
+  parent           LedgerAccount?    @relation("LedgerAccountTree", fields: [parentId], references: [id])
+  children         LedgerAccount[]   @relation("LedgerAccountTree")
+  financialAccount FinancialAccount?
+  categories       Category[]
+  lines            JournalLine[]
+
+  @@unique([businessId, code])
+  @@map("ledger_accounts")
+}
+
+model FiscalPeriod {
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @map("workspace_id") @db.Uuid
+  businessId  String             @map("business_id") @db.Uuid
+  // The calendar year the fiscal year starts in. July 2026 to June 2027 is 2026.
+  fiscalYear  Int                @map("fiscal_year")
+  startDate   DateTime           @map("start_date") @db.Date
+  endDate     DateTime           @map("end_date") @db.Date
+  status      FiscalPeriodStatus @default(OPEN)
+  closedAt    DateTime?          @map("closed_at") @db.Timestamptz(3)
+  closedBy    String?            @map("closed_by") @db.Uuid
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business Business       @relation(fields: [businessId], references: [id])
+  entries  JournalEntry[]
+
+  @@unique([businessId, startDate])
+  @@index([businessId, fiscalYear])
+  @@map("fiscal_periods")
+}
+
+// Append-only: triggers in the migration block UPDATE and DELETE. Corrections are new entries.
+model JournalEntry {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  workspaceId    String      @map("workspace_id") @db.Uuid
+  businessId     String      @map("business_id") @db.Uuid
+  fiscalPeriodId String      @map("fiscal_period_id") @db.Uuid
+  entryNo        String      @map("entry_no")
+  entryDate      DateTime    @map("entry_date") @db.Date
+  kind           JournalKind
+  reversesId     String?     @unique @map("reverses_id") @db.Uuid
+  // What created this entry, e.g. "transaction" and its id. Null for a manual journal.
+  sourceType     String?     @map("source_type")
+  sourceId       String?     @map("source_id") @db.Uuid
+  memo           String?
+  postedBy       String      @map("posted_by") @db.Uuid
+  postedAt       DateTime    @default(now()) @map("posted_at") @db.Timestamptz(3)
+
+  business     Business      @relation(fields: [businessId], references: [id])
+  fiscalPeriod FiscalPeriod  @relation(fields: [fiscalPeriodId], references: [id])
+  reverses     JournalEntry? @relation("JournalReversal", fields: [reversesId], references: [id])
+  reversedBy   JournalEntry? @relation("JournalReversal")
+  lines        JournalLine[]
+
+  postedTransaction   Transaction?    @relation("TransactionJournal")
+  reversedTransaction Transaction?    @relation("TransactionReversalJournal")
+  reconciliation      Reconciliation?
+
+  @@unique([businessId, entryNo])
+  @@index([businessId, entryDate(sort: Desc), id(sort: Desc)])
+  @@index([businessId, sourceType, sourceId])
+  @@map("journal_entries")
+}
+
+// Append-only, like its entry. Amounts are in the business's base currency.
+model JournalLine {
+  id              String  @id @default(uuid(7)) @db.Uuid
+  workspaceId     String  @map("workspace_id") @db.Uuid
+  businessId      String  @map("business_id") @db.Uuid
+  journalEntryId  String  @map("journal_entry_id") @db.Uuid
+  ledgerAccountId String  @map("ledger_account_id") @db.Uuid
+  lineNo          Int     @map("line_no")
+  debitMinor      BigInt  @default(0) @map("debit_minor")
+  creditMinor     BigInt  @default(0) @map("credit_minor")
+  currency        String  @db.Char(3)
+  // For foreign-currency posting later. Until then: rate 1, same amount.
+  baseAmountMinor BigInt  @map("base_amount_minor")
+  fxRate          Decimal @default(1) @map("fx_rate") @db.Decimal(20, 6)
+  memo            String?
+
+  entry          JournalEntry        @relation(fields: [journalEntryId], references: [id])
+  ledgerAccount  LedgerAccount       @relation(fields: [ledgerAccountId], references: [id])
+  reconciliation ReconciliationLine?
+
+  @@unique([journalEntryId, lineNo])
+  @@index([ledgerAccountId, journalEntryId])
+  @@map("journal_lines")
+}
+
+// One statement checked against the books. Phase 7 feeds it from imported statement lines.
+model Reconciliation {
+  id                    String               @id @default(uuid(7)) @db.Uuid
+  workspaceId           String               @map("workspace_id") @db.Uuid
+  businessId            String               @map("business_id") @db.Uuid
+  financialAccountId    String               @map("financial_account_id") @db.Uuid
+  statementDate         DateTime             @map("statement_date") @db.Date
+  statementBalanceMinor BigInt               @map("statement_balance_minor")
+  status                ReconciliationStatus @default(OPEN)
+  // Filled in when it closes, so the record never changes afterwards.
+  bookBalanceMinor      BigInt?              @map("book_balance_minor")
+  differenceMinor       BigInt?              @map("difference_minor")
+  adjustmentEntryId     String?              @unique @map("adjustment_entry_id") @db.Uuid
+  closedAt              DateTime?            @map("closed_at") @db.Timestamptz(3)
+  closedBy              String?              @map("closed_by") @db.Uuid
+  createdBy             String               @map("created_by") @db.Uuid
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  financialAccount FinancialAccount     @relation(fields: [financialAccountId], references: [id])
+  adjustmentEntry  JournalEntry?        @relation(fields: [adjustmentEntryId], references: [id])
+  lines            ReconciliationLine[]
+  business         Business             @relation(fields: [businessId], references: [id])
+
+  @@index([businessId, financialAccountId])
+  @@map("reconciliations")
+}
+
+// Journal lines cannot change, so "this line is reconciled" is a row here instead of a column there.
+model ReconciliationLine {
+  reconciliationId String @map("reconciliation_id") @db.Uuid
+  journalLineId    String @id @map("journal_line_id") @db.Uuid
+  businessId       String @map("business_id") @db.Uuid
+
+  reconciliation Reconciliation @relation(fields: [reconciliationId], references: [id])
+  journalLine    JournalLine    @relation(fields: [journalLineId], references: [id])
+
+  @@index([reconciliationId])
+  @@map("reconciliation_lines")
+}

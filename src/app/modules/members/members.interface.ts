@@ -10,6 +10,7 @@ export interface BusinessContext {
   businessStatus: "ACTIVE" | "INACTIVE" | "ARCHIVED";
   baseCurrency: string;
   timezone: string;
+  fiscalYearStartMonth: number;
   memberId: string;
   roleKey: RoleKey;
   permissions: string[];

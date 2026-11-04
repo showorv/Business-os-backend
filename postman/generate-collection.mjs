@@ -68,6 +68,8 @@ const req = (name, method, path, { auth, body, csrf, tests = [], pre, headers = 
 const A = "/api/v1/auth", U = "/api/v1/users", AU = "/api/v1/audit", B = "/api/v1/businesses";
 const BIZ = `${B}/{{businessId}}`;
 const FIN = `${B}/{{finBusinessId}}`;
+const TOKEN = "{{financeToken}}";
+const lineCodes = `pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor]))`;
 const creds = (password = "{{password}}") => ({ email: "{{email}}", password });
 
 // A real, minimal PDF for the upload requests. Its length must equal sizeBytes.
@@ -294,6 +296,102 @@ pm.collectionVariables.set("duplicateId", t.id);`] }),
     req("Delete document", "DELETE", `${FIN}/documents/{{documentId}}`, { auth: "{{financeToken}}", tests: [status(200)] }),
     req("Void draft", "POST", `${FIN}/transactions/{{transactionId}}/void`, { auth: "{{financeToken}}", tests: [status(200), `pm.test("voided", () => pm.expect(pm.response.json().data.status).to.eql("VOID"));`] }),
     req("Voided cannot be edited", "PATCH", `${FIN}/transactions/{{transactionId}}`, { auth: "{{financeToken}}", body: { description: "x" }, tests: [status(409), errCode("TRANSACTION_NOT_EDITABLE")] }),
+  ]},
+
+  // Phase 4. The same business as Phase 3, now posting to the ledger.
+  { name: "20. Chart of accounts", item: [
+    req("List chart of accounts", "GET", `${FIN}/ledger-accounts`, { auth: TOKEN, tests: [status(200), `const a = pm.response.json().data;
+const id = (code) => a.find((x) => x.code === code).id;
+pm.test("seeded", () => { pm.expect(a.find((x) => x.code === "4900").normalBalance).to.eql("DEBIT"); pm.expect(a.find((x) => x.code === "1110").name).to.eql("City Bank Main"); });
+["1100", "1110", "3000", "6100", "1200", "4000"].forEach((code) => pm.collectionVariables.set("ledger" + code, id(code)));`] }),
+    req("Add an account", "POST", `${FIN}/ledger-accounts`, { auth: TOKEN, body: { code: "6950", name: "Bad Debts", type: "EXPENSE" }, tests: [status(201), `pm.collectionVariables.set("ledgerNew", pm.response.json().data.id);`] }),
+    req("Duplicate code", "POST", `${FIN}/ledger-accounts`, { auth: TOKEN, body: { code: "6950", name: "Again", type: "EXPENSE" }, tests: [status(409), errCode("CODE_TAKEN")] }),
+    req("Rename the account", "PATCH", `${FIN}/ledger-accounts/{{ledgerNew}}`, { auth: TOKEN, body: { nameBn: "অনাদায়ী ঋণ" }, tests: [status(200)] }),
+    req("System account is protected", "PATCH", `${FIN}/ledger-accounts/{{ledger3000}}`, { auth: TOKEN, body: { isActive: false }, tests: [status(409), errCode("LEDGER_ACCOUNT_PROTECTED")] }),
+  ]},
+  { name: "21. Fiscal periods", item: [
+    req("Open fiscal year 2026", "POST", `${FIN}/fiscal-periods/years`, { auth: TOKEN, body: { fiscalYear: 2026 }, tests: [status(201), `pm.test("twelve periods", () => pm.expect(pm.response.json().data.length).to.eql(12));`] }),
+    req("List periods", "GET", `${FIN}/fiscal-periods?fiscalYear=2026`, { auth: TOKEN, tests: [status(200), `const p = pm.response.json().data;
+pm.test("July to June", () => { pm.expect(p[0].startDate).to.eql("2026-07-01"); pm.expect(p[11].endDate).to.eql("2027-06-30"); });
+pm.collectionVariables.set("periodJuly", p[0].id);
+pm.collectionVariables.set("periodAugust", p[1].id);`] }),
+    req("Months close in order", "POST", `${FIN}/fiscal-periods/{{periodAugust}}/status`, { auth: TOKEN, body: { status: "CLOSED" }, tests: [status(409), errCode("PERIOD_ORDER")] }),
+    req("Soft-close July", "POST", `${FIN}/fiscal-periods/{{periodJuly}}/status`, { auth: TOKEN, body: { status: "SOFT_CLOSED" }, tests: [status(200)] }),
+    req("Reopen July", "POST", `${FIN}/fiscal-periods/{{periodJuly}}/status`, { auth: TOKEN, body: { status: "OPEN" }, tests: [status(200)] }),
+    req("Close July", "POST", `${FIN}/fiscal-periods/{{periodJuly}}/status`, { auth: TOKEN, body: { status: "CLOSED" }, tests: [status(200)] }),
+    req("Closed cannot reopen", "POST", `${FIN}/fiscal-periods/{{periodJuly}}/status`, { auth: TOKEN, body: { status: "OPEN" }, tests: [status(409), errCode("INVALID_STATUS_CHANGE")] }),
+    req("Year close needs its periods closed", "POST", `${FIN}/fiscal-periods/years/2026/close`, { auth: TOKEN, tests: [status(409), errCode("YEAR_HAS_OPEN_PERIODS")] }),
+  ]},
+  { name: "22. Posting", item: [
+    req("Owner puts in capital (manual journal)", "POST", `${FIN}/journals`, { auth: TOKEN, body: { entryDate: "2026-11-01", kind: "STANDARD", memo: "Capital", lines: [{ ledgerAccountId: "{{ledger1110}}", debitMinor: "10000000" }, { ledgerAccountId: "{{ledger3000}}", creditMinor: "10000000" }] }, tests: [status(201), `pm.collectionVariables.set("capitalJournalId", pm.response.json().data.id);`] }),
+    req("Unbalanced journal is refused", "POST", `${FIN}/journals`, { auth: TOKEN, body: { entryDate: "2026-11-01", memo: "Bad", lines: [{ ledgerAccountId: "{{ledger1110}}", debitMinor: "100" }, { ledgerAccountId: "{{ledger3000}}", creditMinor: "99" }] }, tests: [status(422), errCode("JOURNAL_UNBALANCED")] }),
+    req("Read the capital journal", "GET", `${FIN}/journals/{{capitalJournalId}}`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("Dr bank, Cr equity", () => ${lineCodes}.to.eql([["1110", "10000000", "0"], ["3000", "0", "10000000"]]));`] }),
+    req("Sale, created and posted together", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "INCOME", accountId: "{{bankId}}", categoryId: "{{salesId}}", amountMinor: "500000", txnDate: "2026-11-05", postNow: true }, tests: [status(201), `const t = pm.response.json().data;
+pm.test("posted", () => pm.expect(t.status).to.eql("POSTED"));
+pm.collectionVariables.set("saleJournalId", t.journalEntryId);`] }),
+    req("Read the sale's journal", "GET", `${FIN}/journals/{{saleJournalId}}`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("Dr bank, Cr revenue", () => ${lineCodes}.to.eql([["1110", "500000", "0"], ["4000", "0", "500000"]]));`] }),
+    req("Rent draft", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "200000", txnDate: "2026-11-06" }, tests: [status(201), `pm.collectionVariables.set("rentTxnId", pm.response.json().data.id);`] }),
+    req("Post the rent", "POST", `${FIN}/transactions/{{rentTxnId}}/post`, { auth: TOKEN, tests: [status(200), `const t = pm.response.json().data;
+pm.test("posted", () => pm.expect(t.status).to.eql("POSTED"));
+pm.collectionVariables.set("rentJournalId", t.journalEntryId);`] }),
+    req("Read the rent's journal", "GET", `${FIN}/journals/{{rentJournalId}}`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("Dr rent, Cr cash", () => ${lineCodes}.to.eql([["6100", "200000", "0"], ["1100", "0", "200000"]]));`] }),
+    req("Posted cannot be edited", "PATCH", `${FIN}/transactions/{{rentTxnId}}`, { auth: TOKEN, body: { description: "x" }, tests: [status(409), errCode("TRANSACTION_NOT_EDITABLE")] }),
+    req("Posted cannot post again", "POST", `${FIN}/transactions/{{rentTxnId}}/post`, { auth: TOKEN, tests: [status(409), errCode("TRANSACTION_NOT_EDITABLE")] }),
+    req("Bank balance followed the ledger", "GET", `${FIN}/accounts/{{bankId}}`, { auth: TOKEN, tests: [status(200), `pm.test("opening 5,000,000 + capital + sale", () => pm.expect(pm.response.json().data.currentBalanceMinor).to.eql("15500000"));`] }),
+    req("Post into closed July", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "EXPENSE", accountId: "{{cashId}}", categoryId: "{{rentId}}", amountMinor: "1", txnDate: "2026-07-15", postNow: true }, tests: [status(409), errCode("PERIOD_CLOSED")] }),
+    req("Transfer with a fee, posted", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "TRANSFER", accountId: "{{bankId}}", toAccountId: "{{cashId}}", amountMinor: "1000000", feeMinor: "18500", txnDate: "2026-11-07", postNow: true }, tests: [status(201)] }),
+  ]},
+  { name: "23. Reversal", item: [
+    req("Wrong expense, posted", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "EXPENSE", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "70000", txnDate: "2026-11-08", postNow: true }, tests: [status(201), `pm.collectionVariables.set("wrongTxnId", pm.response.json().data.id);`] }),
+    req("Reverse it", "POST", `${FIN}/transactions/{{wrongTxnId}}/reverse`, { auth: TOKEN, body: { entryDate: "2026-11-09" }, tests: [status(200), `const t = pm.response.json().data;
+pm.test("voided, with a reversal", () => pm.expect(t.status).to.eql("VOID"));
+pm.collectionVariables.set("reversalJournalId", t.reversalEntryId);`] }),
+    req("Read the reversal", "GET", `${FIN}/journals/{{reversalJournalId}}`, { auth: TOKEN, tests: [status(200), `const d = pm.response.json().data;
+pm.test("sides swapped", () => ${lineCodes}.to.eql([["6100", "0", "70000"], ["1110", "70000", "0"]]));`] }),
+    req("Cannot reverse twice", "POST", `${FIN}/transactions/{{wrongTxnId}}/reverse`, { auth: TOKEN, body: {}, tests: [status(409), errCode("TRANSACTION_NOT_POSTED")] }),
+    req("Manual journal to reverse", "POST", `${FIN}/journals`, { auth: TOKEN, body: { entryDate: "2026-11-10", memo: "Mistake", lines: [{ ledgerAccountId: "{{ledger6100}}", debitMinor: "500" }, { ledgerAccountId: "{{ledger1100}}", creditMinor: "500" }] }, tests: [status(201), `pm.collectionVariables.set("mistakeJournalId", pm.response.json().data.id);`] }),
+    req("Reverse the manual journal", "POST", `${FIN}/journals/{{mistakeJournalId}}/reverse`, { auth: TOKEN, body: { entryDate: "2026-11-10" }, tests: [status(201), `pm.test("reversal kind", () => pm.expect(pm.response.json().data.kind).to.eql("REVERSAL"));`] }),
+    req("List journals", "GET", `${FIN}/journals?ledgerAccountId={{ledger6100}}&from=2026-11-01&to=2026-11-30`, { auth: TOKEN, tests: [status(200), `pm.test("rent lines found", () => pm.expect(pm.response.json().data.length).to.be.above(2));`] }),
+  ]},
+  { name: "24. Approval", item: [
+    req("Set a threshold", "PATCH", FIN, { auth: TOKEN, body: { settings: { approvalThresholdMinor: "1000000" } }, tests: [status(200)] }),
+    req("Invite an approver", "POST", `${FIN}/invitations`, { auth: TOKEN, body: { email: "{{inviteeEmail}}", roleKey: "ADMIN" }, tests: [status(201), `pm.collectionVariables.set("approverInvite", pm.response.json().data.token);`] }),
+    req("Approver joins", "POST", "/api/v1/invitations/accept", { auth: "{{inviteeToken}}", body: { token: "{{approverInvite}}" }, tests: [status(200)] }),
+    req("Big expense waits for approval", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "EXPENSE", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "2000000", txnDate: "2026-11-11", postNow: true }, tests: [status(201), `const t = pm.response.json().data;
+pm.test("pending", () => pm.expect(t.status).to.eql("PENDING_APPROVAL"));
+pm.collectionVariables.set("pendingId", t.id);`] }),
+    req("Creator cannot approve", "POST", `${FIN}/transactions/{{pendingId}}/approve`, { auth: TOKEN, tests: [status(403), errCode("APPROVER_MUST_DIFFER")] }),
+    req("Second person approves", "POST", `${FIN}/transactions/{{pendingId}}/approve`, { auth: "{{inviteeToken}}", tests: [status(200), `pm.test("posted", () => pm.expect(pm.response.json().data.status).to.eql("POSTED"));`] }),
+    req("Another big expense", "POST", `${FIN}/transactions`, { auth: TOKEN, body: { type: "EXPENSE", accountId: "{{bankId}}", categoryId: "{{rentId}}", amountMinor: "3000000", txnDate: "2026-11-12", postNow: true }, tests: [status(201), `pm.collectionVariables.set("rejectId", pm.response.json().data.id);`] }),
+    req("Reject it", "POST", `${FIN}/transactions/{{rejectId}}/reject`, { auth: "{{inviteeToken}}", tests: [status(200), `pm.test("rejected", () => pm.expect(pm.response.json().data.status).to.eql("REJECTED"));`] }),
+  ]},
+  { name: "25. Reports", item: [
+    req("Trial balance", "GET", `${FIN}/reports/trial-balance?asOf=2026-11-30`, { auth: TOKEN, tests: [status(200), `const r = pm.response.json().data;
+pm.test("debits equal credits", () => { pm.expect(r.balanced).to.eql(true); pm.expect(r.totalDebitMinor).to.eql(r.totalCreditMinor); });`] }),
+    req("Profit and loss", "GET", `${FIN}/reports/profit-and-loss?from=2026-11-01&to=2026-11-30`, { auth: TOKEN, tests: [status(200), `const r = pm.response.json().data;
+pm.test("sale 500,000; rent 200,000 + 2,000,000; fee 18,500", () => { pm.expect(r.revenue.totalMinor).to.eql("500000"); pm.expect(r.expenses.totalMinor).to.eql("2218500"); pm.expect(r.netProfitMinor).to.eql("-1718500"); });`] }),
+    req("Balance sheet", "GET", `${FIN}/reports/balance-sheet?asOf=2026-11-30`, { auth: TOKEN, tests: [status(200), `pm.test("assets = liabilities + equity", () => pm.expect(pm.response.json().data.balanced).to.eql(true));`] }),
+    req("Cash flow", "GET", `${FIN}/reports/cash-flow?from=2026-11-01&to=2026-11-30`, { auth: TOKEN, tests: [status(200), `const r = pm.response.json().data;
+pm.test("ties to the cash balance", () => { pm.expect(r.balanced).to.eql(true); pm.expect(r.financing.totalMinor).to.eql("10000000"); });`] }),
+    req("Outsider gets 404", "GET", `${FIN}/reports/trial-balance?asOf=2026-11-30`, { auth: "{{outsiderToken}}", tests: [status(404)] }),
+  ]},
+  { name: "26. Reconciliation", item: [
+    req("Start, against a statement", "POST", `${FIN}/reconciliations`, { auth: TOKEN, body: { financialAccountId: "{{cashId}}", statementDate: "2026-11-30", statementBalanceMinor: "790000" }, tests: [status(201), `pm.collectionVariables.set("reconciliationId", pm.response.json().data.id);`] }),
+    req("Only one open per account", "POST", `${FIN}/reconciliations`, { auth: TOKEN, body: { financialAccountId: "{{cashId}}", statementDate: "2026-11-30", statementBalanceMinor: "1" }, tests: [status(409), errCode("RECONCILIATION_ALREADY_OPEN")] }),
+    req("List", "GET", `${FIN}/reconciliations`, { auth: TOKEN, tests: [status(200)] }),
+    req("Working view", "GET", `${FIN}/reconciliations/{{reconciliationId}}`, { auth: TOKEN, tests: [status(200), `const r = pm.response.json().data;
+pm.test("book 800,000 less 10 on the statement", () => pm.expect(r.bookBalanceMinor).to.eql("800000"));
+pm.collectionVariables.set("reconcileLineIds", JSON.stringify(r.unmatchedLines.map((l) => l.id)));
+pm.collectionVariables.set("oneLineId", r.unmatchedLines[0].id);`] }),
+    req("Match all lines", "POST", `${FIN}/reconciliations/{{reconciliationId}}/lines`, { auth: TOKEN, raw: '{ "journalLineIds": {{reconcileLineIds}} }', tests: [status(200), `pm.test("difference left", () => pm.expect(pm.response.json().data.differenceMinor).to.eql("-10000"));`] }),
+    req("Un-match one", "DELETE", `${FIN}/reconciliations/{{reconciliationId}}/lines/{{oneLineId}}`, { auth: TOKEN, tests: [status(200)] }),
+    req("Match it again", "POST", `${FIN}/reconciliations/{{reconciliationId}}/lines`, { auth: TOKEN, raw: '{ "journalLineIds": ["{{oneLineId}}"] }', tests: [status(200)] }),
+    req("Close refused with a difference", "POST", `${FIN}/reconciliations/{{reconciliationId}}/close`, { auth: TOKEN, body: {}, tests: [status(409), errCode("RECONCILIATION_DIFFERENCE")] }),
+    req("Close with an adjustment", "POST", `${FIN}/reconciliations/{{reconciliationId}}/close`, { auth: TOKEN, body: { adjust: true }, tests: [status(200), `const r = pm.response.json().data;
+pm.test("closed, difference recorded", () => { pm.expect(r.status).to.eql("CLOSED"); pm.expect(r.differenceMinor).to.eql("-10000"); });`] }),
   ]},
 ];
 

@@ -4362,6 +4362,2002 @@
           }
         }
       ]
+    },
+    {
+      "name": "20. Chart of accounts",
+      "item": [
+        {
+          "name": "List chart of accounts",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const a = pm.response.json().data;",
+                  "const id = (code) => a.find((x) => x.code === code).id;",
+                  "pm.test(\"seeded\", () => { pm.expect(a.find((x) => x.code === \"4900\").normalBalance).to.eql(\"DEBIT\"); pm.expect(a.find((x) => x.code === \"1110\").name).to.eql(\"City Bank Main\"); });",
+                  "[\"1100\", \"1110\", \"3000\", \"6100\", \"1200\", \"4000\"].forEach((code) => pm.collectionVariables.set(\"ledger\" + code, id(code)));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/ledger-accounts"
+          }
+        },
+        {
+          "name": "Add an account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"ledgerNew\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"6950\",\n  \"name\": \"Bad Debts\",\n  \"type\": \"EXPENSE\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/ledger-accounts"
+          }
+        },
+        {
+          "name": "Duplicate code",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is CODE_TAKEN\", () => pm.expect(pm.response.json().error.code).to.eql(\"CODE_TAKEN\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"6950\",\n  \"name\": \"Again\",\n  \"type\": \"EXPENSE\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/ledger-accounts"
+          }
+        },
+        {
+          "name": "Rename the account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"nameBn\": \"অনাদায়ী ঋণ\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/ledger-accounts/{{ledgerNew}}"
+          }
+        },
+        {
+          "name": "System account is protected",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is LEDGER_ACCOUNT_PROTECTED\", () => pm.expect(pm.response.json().error.code).to.eql(\"LEDGER_ACCOUNT_PROTECTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isActive\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/ledger-accounts/{{ledger3000}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "21. Fiscal periods",
+      "item": [
+        {
+          "name": "Open fiscal year 2026",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"twelve periods\", () => pm.expect(pm.response.json().data.length).to.eql(12));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscalYear\": 2026\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/years"
+          }
+        },
+        {
+          "name": "List periods",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const p = pm.response.json().data;",
+                  "pm.test(\"July to June\", () => { pm.expect(p[0].startDate).to.eql(\"2026-07-01\"); pm.expect(p[11].endDate).to.eql(\"2027-06-30\"); });",
+                  "pm.collectionVariables.set(\"periodJuly\", p[0].id);",
+                  "pm.collectionVariables.set(\"periodAugust\", p[1].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods?fiscalYear=2026"
+          }
+        },
+        {
+          "name": "Months close in order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is PERIOD_ORDER\", () => pm.expect(pm.response.json().error.code).to.eql(\"PERIOD_ORDER\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/{{periodAugust}}/status"
+          }
+        },
+        {
+          "name": "Soft-close July",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"SOFT_CLOSED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/{{periodJuly}}/status"
+          }
+        },
+        {
+          "name": "Reopen July",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"OPEN\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/{{periodJuly}}/status"
+          }
+        },
+        {
+          "name": "Close July",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/{{periodJuly}}/status"
+          }
+        },
+        {
+          "name": "Closed cannot reopen",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is INVALID_STATUS_CHANGE\", () => pm.expect(pm.response.json().error.code).to.eql(\"INVALID_STATUS_CHANGE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"OPEN\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/{{periodJuly}}/status"
+          }
+        },
+        {
+          "name": "Year close needs its periods closed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is YEAR_HAS_OPEN_PERIODS\", () => pm.expect(pm.response.json().error.code).to.eql(\"YEAR_HAS_OPEN_PERIODS\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/fiscal-periods/years/2026/close"
+          }
+        }
+      ]
+    },
+    {
+      "name": "22. Posting",
+      "item": [
+        {
+          "name": "Owner puts in capital (manual journal)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"capitalJournalId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-11-01\",\n  \"kind\": \"STANDARD\",\n  \"memo\": \"Capital\",\n  \"lines\": [\n    {\n      \"ledgerAccountId\": \"{{ledger1110}}\",\n      \"debitMinor\": \"10000000\"\n    },\n    {\n      \"ledgerAccountId\": \"{{ledger3000}}\",\n      \"creditMinor\": \"10000000\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals"
+          }
+        },
+        {
+          "name": "Unbalanced journal is refused",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 422\", () => pm.response.to.have.status(422));",
+                  "pm.test(\"error code is JOURNAL_UNBALANCED\", () => pm.expect(pm.response.json().error.code).to.eql(\"JOURNAL_UNBALANCED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-11-01\",\n  \"memo\": \"Bad\",\n  \"lines\": [\n    {\n      \"ledgerAccountId\": \"{{ledger1110}}\",\n      \"debitMinor\": \"100\"\n    },\n    {\n      \"ledgerAccountId\": \"{{ledger3000}}\",\n      \"creditMinor\": \"99\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals"
+          }
+        },
+        {
+          "name": "Read the capital journal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Dr bank, Cr equity\", () => pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor])).to.eql([[\"1110\", \"10000000\", \"0\"], [\"3000\", \"0\", \"10000000\"]]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals/{{capitalJournalId}}"
+          }
+        },
+        {
+          "name": "Sale, created and posted together",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"posted\", () => pm.expect(t.status).to.eql(\"POSTED\"));",
+                  "pm.collectionVariables.set(\"saleJournalId\", t.journalEntryId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{salesId}}\",\n  \"amountMinor\": \"500000\",\n  \"txnDate\": \"2026-11-05\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Read the sale's journal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Dr bank, Cr revenue\", () => pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor])).to.eql([[\"1110\", \"500000\", \"0\"], [\"4000\", \"0\", \"500000\"]]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals/{{saleJournalId}}"
+          }
+        },
+        {
+          "name": "Rent draft",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"rentTxnId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"200000\",\n  \"txnDate\": \"2026-11-06\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Post the rent",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"posted\", () => pm.expect(t.status).to.eql(\"POSTED\"));",
+                  "pm.collectionVariables.set(\"rentJournalId\", t.journalEntryId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{rentTxnId}}/post"
+          }
+        },
+        {
+          "name": "Read the rent's journal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"Dr rent, Cr cash\", () => pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor])).to.eql([[\"6100\", \"200000\", \"0\"], [\"1100\", \"0\", \"200000\"]]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals/{{rentJournalId}}"
+          }
+        },
+        {
+          "name": "Posted cannot be edited",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is TRANSACTION_NOT_EDITABLE\", () => pm.expect(pm.response.json().error.code).to.eql(\"TRANSACTION_NOT_EDITABLE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"x\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{rentTxnId}}"
+          }
+        },
+        {
+          "name": "Posted cannot post again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is TRANSACTION_NOT_EDITABLE\", () => pm.expect(pm.response.json().error.code).to.eql(\"TRANSACTION_NOT_EDITABLE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{rentTxnId}}/post"
+          }
+        },
+        {
+          "name": "Bank balance followed the ledger",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"opening 5,000,000 + capital + sale\", () => pm.expect(pm.response.json().data.currentBalanceMinor).to.eql(\"15500000\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/accounts/{{bankId}}"
+          }
+        },
+        {
+          "name": "Post into closed July",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is PERIOD_CLOSED\", () => pm.expect(pm.response.json().error.code).to.eql(\"PERIOD_CLOSED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"1\",\n  \"txnDate\": \"2026-07-15\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Transfer with a fee, posted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"TRANSFER\",\n  \"accountId\": \"{{bankId}}\",\n  \"toAccountId\": \"{{cashId}}\",\n  \"amountMinor\": \"1000000\",\n  \"feeMinor\": \"18500\",\n  \"txnDate\": \"2026-11-07\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "23. Reversal",
+      "item": [
+        {
+          "name": "Wrong expense, posted",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"wrongTxnId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"70000\",\n  \"txnDate\": \"2026-11-08\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Reverse it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"voided, with a reversal\", () => pm.expect(t.status).to.eql(\"VOID\"));",
+                  "pm.collectionVariables.set(\"reversalJournalId\", t.reversalEntryId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-11-09\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{wrongTxnId}}/reverse"
+          }
+        },
+        {
+          "name": "Read the reversal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"sides swapped\", () => pm.expect(d.lines.map((l) => [l.ledgerAccount.code, l.debitMinor, l.creditMinor])).to.eql([[\"6100\", \"0\", \"70000\"], [\"1110\", \"70000\", \"0\"]]));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals/{{reversalJournalId}}"
+          }
+        },
+        {
+          "name": "Cannot reverse twice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is TRANSACTION_NOT_POSTED\", () => pm.expect(pm.response.json().error.code).to.eql(\"TRANSACTION_NOT_POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{wrongTxnId}}/reverse"
+          }
+        },
+        {
+          "name": "Manual journal to reverse",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"mistakeJournalId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-11-10\",\n  \"memo\": \"Mistake\",\n  \"lines\": [\n    {\n      \"ledgerAccountId\": \"{{ledger6100}}\",\n      \"debitMinor\": \"500\"\n    },\n    {\n      \"ledgerAccountId\": \"{{ledger1100}}\",\n      \"creditMinor\": \"500\"\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals"
+          }
+        },
+        {
+          "name": "Reverse the manual journal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"reversal kind\", () => pm.expect(pm.response.json().data.kind).to.eql(\"REVERSAL\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-11-10\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals/{{mistakeJournalId}}/reverse"
+          }
+        },
+        {
+          "name": "List journals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"rent lines found\", () => pm.expect(pm.response.json().data.length).to.be.above(2));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/journals?ledgerAccountId={{ledger6100}}&from=2026-11-01&to=2026-11-30"
+          }
+        }
+      ]
+    },
+    {
+      "name": "24. Approval",
+      "item": [
+        {
+          "name": "Set a threshold",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PATCH",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"settings\": {\n    \"approvalThresholdMinor\": \"1000000\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}"
+          }
+        },
+        {
+          "name": "Invite an approver",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"approverInvite\", pm.response.json().data.token);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{inviteeEmail}}\",\n  \"roleKey\": \"ADMIN\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/invitations"
+          }
+        },
+        {
+          "name": "Approver joins",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{inviteeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{approverInvite}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/invitations/accept"
+          }
+        },
+        {
+          "name": "Big expense waits for approval",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "const t = pm.response.json().data;",
+                  "pm.test(\"pending\", () => pm.expect(t.status).to.eql(\"PENDING_APPROVAL\"));",
+                  "pm.collectionVariables.set(\"pendingId\", t.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"2000000\",\n  \"txnDate\": \"2026-11-11\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Creator cannot approve",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"error code is APPROVER_MUST_DIFFER\", () => pm.expect(pm.response.json().error.code).to.eql(\"APPROVER_MUST_DIFFER\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{pendingId}}/approve"
+          }
+        },
+        {
+          "name": "Second person approves",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"posted\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{inviteeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{pendingId}}/approve"
+          }
+        },
+        {
+          "name": "Another big expense",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"rejectId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{rentId}}\",\n  \"amountMinor\": \"3000000\",\n  \"txnDate\": \"2026-11-12\",\n  \"postNow\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Reject it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"rejected\", () => pm.expect(pm.response.json().data.status).to.eql(\"REJECTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{inviteeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/transactions/{{rejectId}}/reject"
+          }
+        }
+      ]
+    },
+    {
+      "name": "25. Reports",
+      "item": [
+        {
+          "name": "Trial balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"debits equal credits\", () => { pm.expect(r.balanced).to.eql(true); pm.expect(r.totalDebitMinor).to.eql(r.totalCreditMinor); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reports/trial-balance?asOf=2026-11-30"
+          }
+        },
+        {
+          "name": "Profit and loss",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"sale 500,000; rent 200,000 + 2,000,000; fee 18,500\", () => { pm.expect(r.revenue.totalMinor).to.eql(\"500000\"); pm.expect(r.expenses.totalMinor).to.eql(\"2218500\"); pm.expect(r.netProfitMinor).to.eql(\"-1718500\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reports/profit-and-loss?from=2026-11-01&to=2026-11-30"
+          }
+        },
+        {
+          "name": "Balance sheet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"assets = liabilities + equity\", () => pm.expect(pm.response.json().data.balanced).to.eql(true));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reports/balance-sheet?asOf=2026-11-30"
+          }
+        },
+        {
+          "name": "Cash flow",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"ties to the cash balance\", () => { pm.expect(r.balanced).to.eql(true); pm.expect(r.financing.totalMinor).to.eql(\"10000000\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reports/cash-flow?from=2026-11-01&to=2026-11-30"
+          }
+        },
+        {
+          "name": "Outsider gets 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 404\", () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{outsiderToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reports/trial-balance?asOf=2026-11-30"
+          }
+        }
+      ]
+    },
+    {
+      "name": "26. Reconciliation",
+      "item": [
+        {
+          "name": "Start, against a statement",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"reconciliationId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"financialAccountId\": \"{{cashId}}\",\n  \"statementDate\": \"2026-11-30\",\n  \"statementBalanceMinor\": \"790000\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations"
+          }
+        },
+        {
+          "name": "Only one open per account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is RECONCILIATION_ALREADY_OPEN\", () => pm.expect(pm.response.json().error.code).to.eql(\"RECONCILIATION_ALREADY_OPEN\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"financialAccountId\": \"{{cashId}}\",\n  \"statementDate\": \"2026-11-30\",\n  \"statementBalanceMinor\": \"1\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations"
+          }
+        },
+        {
+          "name": "List",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations"
+          }
+        },
+        {
+          "name": "Working view",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"book 800,000 less 10 on the statement\", () => pm.expect(r.bookBalanceMinor).to.eql(\"800000\"));",
+                  "pm.collectionVariables.set(\"reconcileLineIds\", JSON.stringify(r.unmatchedLines.map((l) => l.id)));",
+                  "pm.collectionVariables.set(\"oneLineId\", r.unmatchedLines[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}"
+          }
+        },
+        {
+          "name": "Match all lines",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"difference left\", () => pm.expect(pm.response.json().data.differenceMinor).to.eql(\"-10000\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"journalLineIds\": {{reconcileLineIds}} }"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}/lines"
+          }
+        },
+        {
+          "name": "Un-match one",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}/lines/{{oneLineId}}"
+          }
+        },
+        {
+          "name": "Match it again",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{ \"journalLineIds\": [\"{{oneLineId}}\"] }"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}/lines"
+          }
+        },
+        {
+          "name": "Close refused with a difference",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"error code is RECONCILIATION_DIFFERENCE\", () => pm.expect(pm.response.json().error.code).to.eql(\"RECONCILIATION_DIFFERENCE\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}/close"
+          }
+        },
+        {
+          "name": "Close with an adjustment",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.response.to.have.status(200));",
+                  "const r = pm.response.json().data;",
+                  "pm.test(\"closed, difference recorded\", () => { pm.expect(r.status).to.eql(\"CLOSED\"); pm.expect(r.differenceMinor).to.eql(\"-10000\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{financeToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"adjust\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{finBusinessId}}/reconciliations/{{reconciliationId}}/close"
+          }
+        }
+      ]
     }
   ]
 }

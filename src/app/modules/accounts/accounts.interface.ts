@@ -7,9 +7,6 @@ export type IUpdateAccountBody = z.infer<typeof accountsValidation.update>;
 export type IListAccountsQuery = z.infer<typeof accountsValidation.listQuery>;
 
 export interface ICashAccountInput {
-  workspaceId: string;
-  businessId: string;
-  createdBy: string;
   currency: string;
   openingDate: Date;
 }

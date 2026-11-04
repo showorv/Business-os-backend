@@ -23,6 +23,8 @@ const create = z.object({
   paymentMethod: textField(50).optional(),
   referenceNo: textField(100).optional(),
   description: textField(1000).optional(),
+  // Create and post in one request. Needs ledger.post as well as finance.write.
+  postNow: z.boolean().default(false),
 });
 
 // `type` is left out: to change it, void the draft and create a new one.
@@ -54,4 +56,9 @@ const listQuery = z.object({
 
 const attach = z.object({ documentId: z.uuid() });
 
-export const transactionsValidation = { transactionParams, attachmentParams, create, update, listQuery, attach };
+const reverse = z.object({
+  entryDate: dateField.optional(),
+  memo: textField(500).optional(),
+});
+
+export const transactionsValidation = { transactionParams, attachmentParams, create, update, listQuery, attach, reverse };

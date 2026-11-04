@@ -22,7 +22,7 @@ const resolveContext = async (userId: string, businessId: string): Promise<Busin
   const member = await prisma.businessMember.findUnique({
     where: { businessId_userId: { businessId, userId } },
     include: {
-      business: { select: { status: true, baseCurrency: true, timezone: true } },
+      business: { select: { status: true, baseCurrency: true, timezone: true, fiscalYearStartMonth: true } },
       role: { select: { key: true, permissions: { select: { permissionKey: true } } } },
     },
   });
@@ -35,6 +35,7 @@ const resolveContext = async (userId: string, businessId: string): Promise<Busin
     businessStatus: member.business.status,
     baseCurrency: member.business.baseCurrency,
     timezone: member.business.timezone,
+    fiscalYearStartMonth: member.business.fiscalYearStartMonth,
     memberId: member.id,
     roleKey: member.role.key as RoleKey,
     permissions: [...new Set([...member.role.permissions.map((item) => item.permissionKey), ...member.extraPermissions])],

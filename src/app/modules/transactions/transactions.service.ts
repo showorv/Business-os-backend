@@ -1,19 +1,26 @@
 import type { Prisma } from "../../../lib/prisma.js";
 import { withBusinessScope } from "../../../lib/rls.js";
-import { addDays, fromDbDate, toDbDate } from "../../utils/dates.js";
+import { LedgerCode } from "../../constants/chartOfAccounts.js";
+import { Permission } from "../../constants/permissions.js";
+import { addDays, fromDbDate, todayInTimezone, toDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import { type IdempotencyRequest, withIdempotency } from "../../utils/idempotency.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
+import { buildTransactionLines } from "../../utils/postingRules.js";
 import type { RequestContext } from "../../utils/requestContext.js";
+import { nextSequence } from "../../utils/sequences.js";
 import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import { businessesService } from "../businesses/businesses.service.js";
 import { categoriesService } from "../categories/categories.service.js";
 import { documentsService } from "../documents/documents.service.js";
+import { canPostToSoftClosed, journalsService } from "../journals/journals.service.js";
+import { ledgerAccountsService } from "../ledger-accounts/ledger-accounts.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import type {
   ICreateTransactionBody,
   IListTransactionsQuery,
+  IReverseTransactionBody,
   ITransactionDraft,
   IUpdateTransactionBody,
 } from "./transactions.interface.js";
@@ -103,25 +110,121 @@ const findPossibleDuplicate = async (
     select: { id: true },
   });
 
-// One counter row per business and year. Its row lock makes numbers unique under concurrent requests.
-const nextTransactionNumber = async (tx: Prisma.TransactionClient, businessId: string, txnDate: Date) => {
+const nextTransactionNumber = async (tx: Prisma.TransactionClient, businessId: string, txnDate: Date, prefix: string) => {
   const year = txnDate.getUTCFullYear();
-  const name = `transaction:${year}`;
-  const [row] = await tx.$queryRaw<{ value: bigint }[]>`
-    INSERT INTO business_sequences (business_id, name, value)
-    VALUES (${businessId}::uuid, ${name}, 1)
-    ON CONFLICT (business_id, name) DO UPDATE SET value = business_sequences.value + 1
-    RETURNING value`;
+  return `${prefix}-${year}-${await nextSequence(tx, businessId, `transaction:${year}`)}`;
+};
 
-  const prefix = await businessesService.getTransactionPrefix(tx, businessId);
-  return `${prefix}-${year}-${String(row!.value).padStart(6, "0")}`;
+const assertPermission = (business: BusinessContext, permission: Permission) => {
+  if (!business.permissions.includes(permission)) {
+    throw new AppError(403, ErrorCode.PERMISSION_DENIED, { permission });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Posting to the ledger
+// ---------------------------------------------------------------------------
+
+type StoredTransaction = Prisma.TransactionGetPayload<object>;
+
+// Expenses above the business's threshold need a second person.
+const needsApproval = (transaction: StoredTransaction, threshold: string | null) =>
+  transaction.type === "EXPENSE" && threshold !== null && transaction.amountMinor > BigInt(threshold);
+
+// Turns a transaction into its journal, in one database transaction. This is the only moment a
+// transaction changes the books.
+const postToLedger = async (
+  tx: Prisma.TransactionClient,
+  business: BusinessContext,
+  transaction: StoredTransaction,
+  context: RequestContext,
+  approvedBy?: string,
+) => {
+  const account = await accountsService.getUsable(tx, business.businessId, transaction.accountId);
+  if (account.currency !== business.baseCurrency) {
+    throw new AppError(422, ErrorCode.FOREIGN_CURRENCY_NOT_SUPPORTED, { currency: account.currency });
+  }
+  const toAccount = transaction.toAccountId
+    ? await accountsService.getUsable(tx, business.businessId, transaction.toAccountId)
+    : null;
+
+  // The draft rules allow an adjustment with no category, but posting needs to know its side.
+  if (transaction.type === "ADJUSTMENT" && !transaction.categoryId) {
+    throw new AppError(422, ErrorCode.CATEGORY_REQUIRED);
+  }
+  const category = transaction.categoryId
+    ? await categoriesService.getUsable(tx, business.businessId, transaction.categoryId)
+    : null;
+  if (category && !category.ledgerAccountId) throw new AppError(409, ErrorCode.BUSINESS_NOT_PROVISIONED);
+
+  const salesReturns = await ledgerAccountsService.getByCode(tx, business.businessId, LedgerCode.SALES_RETURNS);
+  const bankCharges = await ledgerAccountsService.getByCode(tx, business.businessId, LedgerCode.BANK_CHARGES);
+
+  const entry = await journalsService.post(tx, business, {
+    entryDate: transaction.txnDate,
+    kind: "STANDARD",
+    memo: transaction.description ?? transaction.number,
+    sourceType: "transaction",
+    sourceId: transaction.id,
+    allowSoftClosed: canPostToSoftClosed(business),
+    lines: buildTransactionLines({
+      type: transaction.type,
+      amountMinor: transaction.amountMinor,
+      feeMinor: transaction.feeMinor,
+      accountLedgerId: accountsService.ledgerIdOf(account),
+      toAccountLedgerId: toAccount ? accountsService.ledgerIdOf(toAccount) : null,
+      categoryLedgerId: category?.ledgerAccountId ?? null,
+      categoryType: category?.type ?? null,
+      salesReturnsLedgerId: salesReturns.id,
+      bankChargesLedgerId: bankCharges.id,
+    }),
+  });
+
+  const posted = await tx.transaction.update({
+    where: { id: transaction.id },
+    data: {
+      status: "POSTED",
+      journalEntryId: entry.id,
+      ...(approvedBy ? { approvedBy, approvedAt: new Date() } : {}),
+    },
+  });
+  await auditService.recordForBusiness(tx, business, {
+    action: "transaction.posted",
+    context,
+    entityType: "transaction",
+    entityId: transaction.id,
+    after: { number: transaction.number, entryNo: entry.entryNo, amountMinor: transaction.amountMinor, approvedBy },
+  });
+  return posted;
+};
+
+// Posts straight away, or waits for a second person if the amount is above the threshold.
+const submit = async (
+  tx: Prisma.TransactionClient,
+  business: BusinessContext,
+  transaction: StoredTransaction,
+  context: RequestContext,
+) => {
+  const { approvalThresholdMinor } = await businessesService.getTransactionSettings(tx, business.businessId);
+  if (!needsApproval(transaction, approvalThresholdMinor)) return postToLedger(tx, business, transaction, context);
+
+  // Notifying the approver is added in Phase 6.
+  const pending = await tx.transaction.update({ where: { id: transaction.id }, data: { status: "PENDING_APPROVAL" } });
+  await auditService.recordForBusiness(tx, business, {
+    action: "transaction.submitted",
+    context,
+    entityType: "transaction",
+    entityId: transaction.id,
+    after: { amountMinor: transaction.amountMinor, thresholdMinor: approvalThresholdMinor },
+  });
+  return pending;
 };
 
 // ---------------------------------------------------------------------------
 // Service functions
 // ---------------------------------------------------------------------------
 
-// Everything is created as a DRAFT. Phase 4 adds approval and posting to the ledger.
+// Everything starts as a DRAFT. postNow runs the post step in the same transaction.
 const create = (
   business: BusinessContext,
   body: ICreateTransactionBody,
@@ -130,6 +233,8 @@ const create = (
 ) =>
   withBusinessScope(business, (tx) =>
     withIdempotency(tx, business.userId, idempotency, 201, async () => {
+      if (body.postNow) assertPermission(business, Permission.LEDGER_POST);
+
       const draft: ITransactionDraft = {
         type: body.type,
         accountId: body.accountId,
@@ -145,13 +250,14 @@ const create = (
       const currency = await resolveCurrency(tx, business.businessId, draft, body.currency);
       await assertCategoryFits(tx, business.businessId, draft);
       const duplicate = await findPossibleDuplicate(tx, business.businessId, draft);
+      const { transactionPrefix } = await businessesService.getTransactionSettings(tx, business.businessId);
 
       const transaction = await tx.transaction.create({
         data: {
           ...draft,
           workspaceId: business.workspaceId,
           businessId: business.businessId,
-          number: await nextTransactionNumber(tx, business.businessId, draft.txnDate),
+          number: await nextTransactionNumber(tx, business.businessId, draft.txnDate, transactionPrefix),
           currency,
           paymentMethod: body.paymentMethod ?? null,
           description: body.description ?? null,
@@ -168,7 +274,7 @@ const create = (
         entityId: transaction.id,
         after: { number: transaction.number, type: draft.type, amountMinor: draft.amountMinor, currency },
       });
-      return toDto(transaction);
+      return toDto(body.postNow ? await submit(tx, business, transaction, context) : transaction);
     }),
   );
 
@@ -302,7 +408,7 @@ const dismissDuplicate = (business: BusinessContext, transactionId: string, cont
     return toDto(after);
   });
 
-// A draft is voided, never deleted. Posted transactions get reversals in Phase 4.
+// A draft is voided, never deleted. A posted transaction is reversed instead.
 const voidDraft = (business: BusinessContext, transactionId: string, context: RequestContext) =>
   withBusinessScope(business, async (tx) => {
     const before = await lockOrThrow(tx, business.businessId, transactionId);
@@ -318,6 +424,72 @@ const voidDraft = (business: BusinessContext, transactionId: string, context: Re
       after: { status: after.status },
     });
     return toDto(after);
+  });
+
+const post = (business: BusinessContext, transactionId: string, context: RequestContext) =>
+  withBusinessScope(business, async (tx) => {
+    const transaction = await lockOrThrow(tx, business.businessId, transactionId);
+    assertDraft(transaction.status);
+    return toDto(await submit(tx, business, transaction, context));
+  });
+
+const assertPending = (status: string) => {
+  if (status !== "PENDING_APPROVAL") throw new AppError(409, ErrorCode.TRANSACTION_NOT_PENDING, { status });
+};
+
+// The second-person check: whoever entered a transaction can't approve it.
+const approve = (business: BusinessContext, transactionId: string, context: RequestContext) =>
+  withBusinessScope(business, async (tx) => {
+    const transaction = await lockOrThrow(tx, business.businessId, transactionId);
+    assertPending(transaction.status);
+    if (transaction.createdBy === business.userId) throw new AppError(403, ErrorCode.APPROVER_MUST_DIFFER);
+    return toDto(await postToLedger(tx, business, transaction, context, business.userId));
+  });
+
+const reject = (business: BusinessContext, transactionId: string, context: RequestContext) =>
+  withBusinessScope(business, async (tx) => {
+    const transaction = await lockOrThrow(tx, business.businessId, transactionId);
+    assertPending(transaction.status);
+    const rejected = await tx.transaction.update({ where: { id: transactionId }, data: { status: "REJECTED" } });
+    await auditService.recordForBusiness(tx, business, {
+      action: "transaction.rejected",
+      context,
+      entityType: "transaction",
+      entityId: transactionId,
+    });
+    return toDto(rejected);
+  });
+
+// Books a mirror-image journal in the current period. The original journal stays as it was.
+const reverse = (
+  business: BusinessContext,
+  transactionId: string,
+  body: IReverseTransactionBody,
+  context: RequestContext,
+) =>
+  withBusinessScope(business, async (tx) => {
+    const transaction = await lockOrThrow(tx, business.businessId, transactionId);
+    if (transaction.status !== "POSTED" || !transaction.journalEntryId) {
+      throw new AppError(409, ErrorCode.TRANSACTION_NOT_POSTED, { status: transaction.status });
+    }
+
+    const entry = await journalsService.reverse(tx, business, transaction.journalEntryId, {
+      entryDate: toDbDate(body.entryDate ?? todayInTimezone(business.timezone)),
+      memo: body.memo,
+      allowSoftClosed: canPostToSoftClosed(business),
+    });
+    const reversed = await tx.transaction.update({
+      where: { id: transactionId },
+      data: { status: "VOID", reversalEntryId: entry.id },
+    });
+    await auditService.recordForBusiness(tx, business, {
+      action: "transaction.reversed",
+      context,
+      entityType: "transaction",
+      entityId: transactionId,
+      after: { reversalNo: entry.entryNo, memo: body.memo },
+    });
+    return toDto(reversed);
   });
 
 const attachDocument = (
@@ -383,6 +555,10 @@ export const transactionsService = {
   update,
   dismissDuplicate,
   voidDraft,
+  post,
+  approve,
+  reject,
+  reverse,
   attachDocument,
   detachDocument,
 };

@@ -114,6 +114,9 @@ export const setupFinance = async (): Promise<FinanceSetup> => {
   const business = await createBusiness(owner);
   const base = `${API}/businesses/${business.id}`;
 
+  // Fixed dates in these tests must always land in an open year, whatever today's date is.
+  await api().post(`${base}/fiscal-periods/years`).set("Authorization", auth).send({ fiscalYear: 2026 });
+
   const accounts = await api().get(`${base}/accounts`).set("Authorization", auth);
   const categories = await api().get(`${base}/categories`).set("Authorization", auth);
   const bank = await api().post(`${base}/accounts`).set("Authorization", auth).send({ name: "City Bank", type: "BANK" });
@@ -154,4 +157,26 @@ export const uploadDocument = async (base: string, auth: string, bytes = PDF_BYT
   const done = await api().post(`${base}/documents/${created.body.data.document.id}/complete`).set("Authorization", auth);
   if (done.status !== 200) throw new Error(`complete failed: ${JSON.stringify(done.body)}`);
   return done.body.data as { id: string; sha256: string };
+};
+
+export interface LedgerLine {
+  code: string;
+  debit: string;
+  credit: string;
+}
+
+// A journal's lines in a compact form, e.g. { code: "6100", debit: "3000000", credit: "0" }.
+export const journalLines = async (base: string, auth: string, journalId: string): Promise<LedgerLine[]> => {
+  const res = await api().get(`${base}/journals/${journalId}`).set("Authorization", auth);
+  if (res.status !== 200) throw new Error(`journal failed: ${JSON.stringify(res.body)}`);
+  return res.body.data.lines.map((line: { ledgerAccount: { code: string }; debitMinor: string; creditMinor: string }) => ({
+    code: line.ledgerAccount.code,
+    debit: line.debitMinor,
+    credit: line.creditMinor,
+  }));
+};
+
+export const ledgerIdByCode = async (base: string, auth: string, code: string) => {
+  const res = await api().get(`${base}/ledger-accounts`).set("Authorization", auth);
+  return res.body.data.find((account: { code: string }) => account.code === code).id as string;
 };

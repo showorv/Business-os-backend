@@ -9,6 +9,9 @@ import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
 import { categoriesService } from "../categories/categories.service.js";
+import { fiscalPeriodsService, fiscalYearOf } from "../fiscal-periods/fiscal-periods.service.js";
+import { journalsService } from "../journals/journals.service.js";
+import { ledgerAccountsService } from "../ledger-accounts/ledger-accounts.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import { membersService } from "../members/members.service.js";
 import type {
@@ -28,19 +31,35 @@ const ALLOWED_TRANSITIONS: Record<BusinessStatus, BusinessStatus[]> = {
   ARCHIVED: ["ACTIVE"],
 };
 
-// The starting data every business needs. Phase 4 adds the chart of accounts and fiscal periods.
-// Safe to run twice, which lets src/scripts/provision-businesses.ts repair older businesses.
+// The starting data every business needs. Each step does nothing if it was already done, which lets
+// src/scripts/provision-businesses.ts repair businesses created before a phase added its step.
 const provision = async (
   tx: Prisma.TransactionClient,
-  business: { id: string; workspaceId: string; type: BusinessType; baseCurrency: string; timezone: string; createdBy: string },
+  business: {
+    id: string;
+    workspaceId: string;
+    type: BusinessType;
+    baseCurrency: string;
+    timezone: string;
+    fiscalYearStartMonth: number;
+    createdBy: string;
+  },
 ) => {
-  const owner = { workspaceId: business.workspaceId, businessId: business.id, createdBy: business.createdBy };
-  await accountsService.ensureCashAccount(tx, {
-    ...owner,
-    currency: business.baseCurrency,
-    openingDate: toDbDate(todayInTimezone(business.timezone)),
-  });
-  await categoriesService.seedDefaults(tx, owner, business.type);
+  const actor = {
+    userId: business.createdBy,
+    workspaceId: business.workspaceId,
+    businessId: business.id,
+    baseCurrency: business.baseCurrency,
+    fiscalYearStartMonth: business.fiscalYearStartMonth,
+  };
+  const today = toDbDate(todayInTimezone(business.timezone));
+
+  await ledgerAccountsService.seedChart(tx, actor, business.type);
+  await fiscalPeriodsService.ensureYear(tx, actor, fiscalYearOf(today, business.fiscalYearStartMonth));
+  await accountsService.ensureCashAccount(tx, actor, { currency: business.baseCurrency, openingDate: today });
+  await accountsService.linkExistingToLedger(tx, actor);
+  await categoriesService.seedDefaults(tx, actor, business.type);
+  await categoriesService.linkExistingToLedger(tx, actor, business.type);
 };
 
 // One transaction: a business never exists without its owner and starting data.
@@ -108,7 +127,18 @@ const update = async (business: BusinessContext, body: IUpdateBusinessBody, cont
   const updated = await withBusinessScope(business, async (tx) => {
     const before = await tx.business.findUniqueOrThrow({ where: { id: business.businessId } });
 
-    // Phase 4: refuse a baseCurrency change once the business has posted journals.
+    // Fiscal periods are already built around the start month, and journals around the currency.
+    if (body.fiscalYearStartMonth !== undefined && body.fiscalYearStartMonth !== before.fiscalYearStartMonth) {
+      throw new AppError(409, ErrorCode.FISCAL_START_LOCKED);
+    }
+    if (
+      body.baseCurrency !== undefined &&
+      body.baseCurrency !== before.baseCurrency &&
+      (await journalsService.hasPostedEntries(tx, business.businessId))
+    ) {
+      throw new AppError(409, ErrorCode.BASE_CURRENCY_LOCKED);
+    }
+
     const { settings, ...fields } = body;
     const after = await tx.business.update({
       where: { id: business.businessId },
@@ -133,9 +163,9 @@ const update = async (business: BusinessContext, body: IUpdateBusinessBody, cont
   return updated;
 };
 
-const getTransactionPrefix = async (tx: Prisma.TransactionClient, businessId: string) => {
+const getTransactionSettings = async (tx: Prisma.TransactionClient, businessId: string) => {
   const { settings } = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { settings: true } });
-  return (settings as { transactionPrefix: string }).transactionPrefix;
+  return settings as { transactionPrefix: string; approvalThresholdMinor: string | null };
 };
 
 const changeStatus = async (business: BusinessContext, status: BusinessStatus, context: RequestContext) => {
@@ -160,4 +190,4 @@ const changeStatus = async (business: BusinessContext, status: BusinessStatus, c
   return updated;
 };
 
-export const businessesService = { provision, create, listMine, getOne, update, changeStatus, getTransactionPrefix };
+export const businessesService = { provision, create, listMine, getOne, update, changeStatus, getTransactionSettings };

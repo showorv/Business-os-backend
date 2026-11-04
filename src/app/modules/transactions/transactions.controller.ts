@@ -7,6 +7,7 @@ import type {
   IAttachmentParams,
   ICreateTransactionBody,
   IListTransactionsQuery,
+  IReverseTransactionBody,
   ITransactionParams,
   IUpdateTransactionBody,
 } from "./transactions.interface.js";
@@ -54,6 +55,32 @@ const voidDraft: RequestHandler = async (req, res) => {
   sendResponse(res, 200, await transactionsService.voidDraft(req.business!, transactionId, getRequestContext(req)));
 };
 
+const post: RequestHandler = async (req, res) => {
+  const { transactionId } = req.validated.params as ITransactionParams;
+  sendResponse(res, 200, await transactionsService.post(req.business!, transactionId, getRequestContext(req)));
+};
+
+const approve: RequestHandler = async (req, res) => {
+  const { transactionId } = req.validated.params as ITransactionParams;
+  sendResponse(res, 200, await transactionsService.approve(req.business!, transactionId, getRequestContext(req)));
+};
+
+const reject: RequestHandler = async (req, res) => {
+  const { transactionId } = req.validated.params as ITransactionParams;
+  sendResponse(res, 200, await transactionsService.reject(req.business!, transactionId, getRequestContext(req)));
+};
+
+const reverse: RequestHandler = async (req, res) => {
+  const { transactionId } = req.validated.params as ITransactionParams;
+  const transaction = await transactionsService.reverse(
+    req.business!,
+    transactionId,
+    req.validated.body as IReverseTransactionBody,
+    getRequestContext(req),
+  );
+  sendResponse(res, 200, transaction);
+};
+
 const attachDocument: RequestHandler = async (req, res) => {
   const { transactionId } = req.validated.params as ITransactionParams;
   const { documentId } = req.validated.body as IAttachBody;
@@ -74,6 +101,10 @@ export const transactionsController = {
   update,
   dismissDuplicate,
   voidDraft,
+  post,
+  approve,
+  reject,
+  reverse,
   attachDocument,
   detachDocument,
 };
