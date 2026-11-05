@@ -100,6 +100,7 @@ Tests never touch Neon. They always use the local `business_os_test` database, a
 | `npm run ai:eval` | Scores the real AI against the evaluation set. Needs `AI_API_KEY`, and uses your daily quota |
 | `npm run test:postman` | Runs the Postman collection against the API on port 5001 |
 | `npm run postman:build` | Rebuilds the collection from `postman/generate-collection.mjs` |
+| `npm run postman:demo` | Rebuilds the one-month demo from `postman/generate-demo-month.mjs` |
 
 ## Folder structure
 
@@ -1218,6 +1219,33 @@ Copy `accessToken` from the response, then:
 ```bash
 curl -H 'Authorization: Bearer PASTE_TOKEN_HERE' http://localhost:5001/api/v1/users/me
 ```
+
+### See a realistic month with Postman
+`postman/Business_OS_Demo_Month.postman_collection.json` runs one month for a small shop, **October 2026**, so you can read real-looking reports. Import it, keep `npm run dev` and `npm run worker` running, click **Run**, and keep the requests in order.
+
+Each run creates its own login and business, in whichever database the API is using, and the login appears in Postman's console. It can't be deleted afterwards, because audit rows are permanent. To keep Neon clean, point `.env` at local Docker first. On Neon it will take several minutes.
+
+| What it does | |
+|---|---|
+| **Set up** | A shop, with City Bank (৳5,00,000) and bKash (৳25,000) opening balances, a budget and a goal |
+| **Daily activity** | 12 sales, 14 expenses, 2 transfers including a fee, a refund, and a mistake that's reversed |
+| **Plans** | Tasks, including an overdue one, a reminder and a salary schedule |
+| **Bank statement** | A CSV import: 15 of 16 lines settle themselves, and the collection categorizes the last |
+| **Reconciliation** | Reaches zero, and closes |
+| **AI** | English and Bangla questions, if `AI_API_KEY` is set |
+
+**The figures it should reach, checked to the paisa:**
+| | October 2026 |
+|---|---|
+| Revenue | ৳3,43,700.50 |
+| Expenses | ৳3,10,989.25 |
+| **Net profit** | **৳32,711.25** |
+| City Bank | ৳3,42,931.50 |
+| bKash | ৳62,400.50 |
+| Cash | ৳1,52,379.25 |
+| **Total cash** | **৳5,57,711.25** |
+
+To change the month, edit `postman/generate-demo-month.mjs` and run `npm run postman:demo`.
 
 ### Test every endpoint with Postman
 

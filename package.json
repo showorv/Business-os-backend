@@ -17,6 +17,7 @@
     "db:status": "prisma migrate status",
     "audit:verify": "tsx src/scripts/verify-audit.ts",
     "postinstall": "prisma skills sync || exit 0",
+    "postman:demo": "node postman/generate-demo-month.mjs",
     "postman:build": "node postman/generate-collection.mjs",
     "ai:eval": "RUN_MODEL_TESTS=1 AI_EVAL_LIVE=1 vitest run tests/ai-evaluation.test.ts --testTimeout=1800000",
     "test:models": "RUN_MODEL_TESTS=1 vitest run tests/ai-real-models.test.ts --testTimeout=300000",

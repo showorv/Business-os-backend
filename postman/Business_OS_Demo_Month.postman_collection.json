@@ -1,0 +1,3224 @@
+{
+  "info": {
+    "name": "Business OS: Demo Month (October 2026)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "One realistic month for a small shop. Run the whole collection once, in order, with the API and worker running. Each run creates a new login and business. See README.md."
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5001"
+    },
+    {
+      "key": "demoPassword",
+      "value": "demo-month-password"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Set up the shop",
+      "item": [
+        {
+          "name": "Create your demo login",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const email = \"demo\" + Date.now() + \"@example.com\";",
+                  "pm.collectionVariables.set(\"demoEmail\", email);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);",
+                  "console.log(\"Demo login:\", pm.collectionVariables.get(\"demoEmail\"), pm.collectionVariables.get(\"demoPassword\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Demo Owner\",\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\",\n  \"locale\": \"en\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/register"
+          }
+        },
+        {
+          "name": "Create the business",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoBusinessId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"ঢাকা ডেমো ট্রেডার্স\",\n  \"type\": \"RETAIL\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses"
+          }
+        },
+        {
+          "name": "Open the 2026 financial year",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201 or 409\", () => pm.expect([201,409]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fiscalYear\": 2026\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/fiscal-periods/years"
+          }
+        },
+        {
+          "name": "Find the Cash account and categories",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const names = {\"Sales\":\"catSales\",\"Other Income\":\"catOtherIncome\",\"Bank & MFS Charges\":\"catBankMFSCharges\",\"Purchases\":\"catPurchases\",\"Transport\":\"catTransport\",\"Rent\":\"catRent\",\"Office Supplies\":\"catOfficeSupplies\",\"Marketing\":\"catMarketing\",\"Utilities\":\"catUtilities\",\"Software & Subscriptions\":\"catSoftwareSubscriptions\",\"Other Expenses\":\"catOtherExpenses\",\"Salaries\":\"catSalaries\"};",
+                  "for (const category of pm.response.json().data) {",
+                  "  if (names[category.name]) pm.collectionVariables.set(names[category.name], category.id);",
+                  "}",
+                  "pm.test(\"every category exists\", () => Object.values(names).forEach((name) => pm.expect(pm.collectionVariables.get(name)).to.be.a(\"string\")));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/categories"
+          }
+        },
+        {
+          "name": "Read the Cash account",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"cashId\", pm.response.json().data[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Add City Bank, opening ৳5,00,000",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"bankId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"City Bank\",\n  \"type\": \"BANK\",\n  \"openingBalanceMinor\": \"50000000\",\n  \"openingDate\": \"2026-10-01\",\n  \"accountNumber\": \"0012345678\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Add bKash, opening ৳25,000",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"bkashId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"bKash Merchant\",\n  \"type\": \"BKASH\",\n  \"openingBalanceMinor\": \"2500000\",\n  \"openingDate\": \"2026-10-01\",\n  \"accountNumber\": \"01712345678\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Budget for October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"budgetId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"অক্টোবর ২০২৬\",\n  \"startMonth\": \"2026-10\",\n  \"endMonth\": \"2026-10\",\n  \"lines\": [\n    {\n      \"categoryId\": \"{{catRent}}\",\n      \"amountMinor\": \"3500000\",\n      \"alertPercent\": 80\n    },\n    {\n      \"categoryId\": \"{{catMarketing}}\",\n      \"amountMinor\": \"1000000\",\n      \"alertPercent\": 80\n    }\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/budgets"
+          }
+        },
+        {
+          "name": "Goal: ৳3,00,000 revenue in October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"goalId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"অক্টোবরের বিক্রির লক্ষ্য\",\n  \"metric\": \"REVENUE\",\n  \"targetMinor\": \"30000000\",\n  \"startMonth\": \"2026-10\",\n  \"endMonth\": \"2026-10\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/goals"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Move money between accounts",
+      "item": [
+        {
+          "name": "Bank to Cash: ৳50,000",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"TRANSFER\",\n  \"accountId\": \"{{bankId}}\",\n  \"toAccountId\": \"{{cashId}}\",\n  \"amountMinor\": \"5000000\",\n  \"txnDate\": \"2026-10-01\",\n  \"referenceNo\": \"TRF-1\",\n  \"description\": \"Cash for the shop\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Bank to bKash: ৳10,000, with a ৳18.50 fee",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"TRANSFER\",\n  \"accountId\": \"{{bankId}}\",\n  \"toAccountId\": \"{{bkashId}}\",\n  \"amountMinor\": \"1000000\",\n  \"feeMinor\": \"1850\",\n  \"txnDate\": \"2026-10-20\",\n  \"referenceNo\": \"TRF-2\",\n  \"description\": \"Top up bKash\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. A month of sales",
+      "item": [
+        {
+          "name": "Sale 2026-10-01: ৳18,500 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"1850000\",\n  \"txnDate\": \"2026-10-01\",\n  \"referenceNo\": \"CASH-1001\",\n  \"description\": \"দোকানে নগদ বিক্রি\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-03: ৳12,750 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"1275000\",\n  \"txnDate\": \"2026-10-03\",\n  \"referenceNo\": \"BK-2201\",\n  \"description\": \"bKash payment from retail customers\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-05: ৳45,000 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"4500000\",\n  \"txnDate\": \"2026-10-05\",\n  \"referenceNo\": \"INV-3001\",\n  \"description\": \"Wholesale order, Rahman Stores\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-07: ৳21,300 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"2130000\",\n  \"txnDate\": \"2026-10-07\",\n  \"referenceNo\": \"CASH-1002\",\n  \"description\": \"দোকানে নগদ বিক্রি\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-10: ৳62,500 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"6250000\",\n  \"txnDate\": \"2026-10-10\",\n  \"referenceNo\": \"INV-3002\",\n  \"description\": \"Wholesale order, Karim & Sons\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-12: ৳9,850.5 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"985050\",\n  \"txnDate\": \"2026-10-12\",\n  \"referenceNo\": \"BK-2202\",\n  \"description\": \"bKash payment from retail customers\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-15: ৳26,400 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"2640000\",\n  \"txnDate\": \"2026-10-15\",\n  \"referenceNo\": \"CASH-1003\",\n  \"description\": \"দোকানে নগদ বিক্রি\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-18: ৳38,200 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"3820000\",\n  \"txnDate\": \"2026-10-18\",\n  \"referenceNo\": \"INV-3003\",\n  \"description\": \"Wholesale order, Dhaka Mart\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-21: ৳19,950 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"1995000\",\n  \"txnDate\": \"2026-10-21\",\n  \"referenceNo\": \"CASH-1004\",\n  \"description\": \"দোকানে নগদ বিক্রি\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-24: ৳14,300 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"1430000\",\n  \"txnDate\": \"2026-10-24\",\n  \"referenceNo\": \"BK-2203\",\n  \"description\": \"bKash payment from retail customers\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-27: ৳51,000 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"5100000\",\n  \"txnDate\": \"2026-10-27\",\n  \"referenceNo\": \"INV-3004\",\n  \"description\": \"Wholesale order, Rahman Stores\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Sale 2026-10-30: ৳23,650 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"INCOME\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"2365000\",\n  \"txnDate\": \"2026-10-30\",\n  \"referenceNo\": \"CASH-1005\",\n  \"description\": \"দোকানে নগদ বিক্রি\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. A month of expenses",
+      "item": [
+        {
+          "name": "Sign in again (tokens last 15 minutes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "Purchases 2026-10-02: ৳85,000 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catPurchases}}\",\n  \"amountMinor\": \"8500000\",\n  \"txnDate\": \"2026-10-02\",\n  \"referenceNo\": \"PO-501\",\n  \"description\": \"Stock from Noor Traders\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Transport 2026-10-02: ৳1,250 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catTransport}}\",\n  \"amountMinor\": \"125000\",\n  \"txnDate\": \"2026-10-02\",\n  \"description\": \"ডেলিভারি ভ্যান ভাড়া\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Rent 2026-10-04: ৳30,000 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catRent}}\",\n  \"amountMinor\": \"3000000\",\n  \"txnDate\": \"2026-10-04\",\n  \"referenceNo\": \"CHQ-7701\",\n  \"description\": \"দোকান ভাড়া, অক্টোবর\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Office Supplies 2026-10-06: ৳2,340.75 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catOfficeSupplies}}\",\n  \"amountMinor\": \"234075\",\n  \"txnDate\": \"2026-10-06\",\n  \"description\": \"Receipt books and packing tape\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Marketing 2026-10-08: ৳4,500 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catMarketing}}\",\n  \"amountMinor\": \"450000\",\n  \"txnDate\": \"2026-10-08\",\n  \"referenceNo\": \"FB-22\",\n  \"description\": \"Facebook ads\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Utilities 2026-10-09: ৳6,820 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catUtilities}}\",\n  \"amountMinor\": \"682000\",\n  \"txnDate\": \"2026-10-09\",\n  \"referenceNo\": \"DESCO-1\",\n  \"description\": \"বিদ্যুৎ বিল, সেপ্টেম্বর\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Transport 2026-10-11: ৳980 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catTransport}}\",\n  \"amountMinor\": \"98000\",\n  \"txnDate\": \"2026-10-11\",\n  \"description\": \"রিকশা ও ভ্যান ভাড়া\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Purchases 2026-10-14: ৳64,300 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catPurchases}}\",\n  \"amountMinor\": \"6430000\",\n  \"txnDate\": \"2026-10-14\",\n  \"referenceNo\": \"PO-502\",\n  \"description\": \"Stock from Noor Traders\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Software & Subscriptions 2026-10-16: ৳1,200 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catSoftwareSubscriptions}}\",\n  \"amountMinor\": \"120000\",\n  \"txnDate\": \"2026-10-16\",\n  \"referenceNo\": \"POS-OCT\",\n  \"description\": \"POS software, monthly\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Other Expenses 2026-10-19: ৳1,650 (cash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catOtherExpenses}}\",\n  \"amountMinor\": \"165000\",\n  \"txnDate\": \"2026-10-19\",\n  \"description\": \"চা ও আপ্যায়ন\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Marketing 2026-10-22: ৳3,800 (bkash)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bkashId}}\",\n  \"categoryId\": \"{{catMarketing}}\",\n  \"amountMinor\": \"380000\",\n  \"txnDate\": \"2026-10-22\",\n  \"referenceNo\": \"FB-23\",\n  \"description\": \"Facebook ads\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Utilities 2026-10-25: ৳2,150 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catUtilities}}\",\n  \"amountMinor\": \"215000\",\n  \"txnDate\": \"2026-10-25\",\n  \"referenceNo\": \"ISP-10\",\n  \"description\": \"Internet bill\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Purchases 2026-10-28: ৳41,750 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catPurchases}}\",\n  \"amountMinor\": \"4175000\",\n  \"txnDate\": \"2026-10-28\",\n  \"referenceNo\": \"PO-503\",\n  \"description\": \"Stock from Noor Traders\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Salaries 2026-10-31: ৳65,000 (bank)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{bankId}}\",\n  \"categoryId\": \"{{catSalaries}}\",\n  \"amountMinor\": \"6500000\",\n  \"txnDate\": \"2026-10-31\",\n  \"referenceNo\": \"SAL-OCT\",\n  \"description\": \"অক্টোবরের বেতন, ৩ জন কর্মী\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. A refund and a mistake",
+      "item": [
+        {
+          "name": "Refund: ৳1,200",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"REFUND\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catSales}}\",\n  \"amountMinor\": \"120000\",\n  \"txnDate\": \"2026-10-13\",\n  \"description\": \"Returned goods, cash refund\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "A mistake: ৳7,777",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.test(\"posted to the ledger\", () => pm.expect(pm.response.json().data.status).to.eql(\"POSTED\"));",
+                  "pm.collectionVariables.set(\"mistakeId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"postNow\": true,\n  \"type\": \"EXPENSE\",\n  \"accountId\": \"{{cashId}}\",\n  \"categoryId\": \"{{catOtherExpenses}}\",\n  \"amountMinor\": \"777700\",\n  \"txnDate\": \"2026-10-17\",\n  \"description\": \"Typed by mistake, then reversed\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions"
+          }
+        },
+        {
+          "name": "Reverse the mistake, on the same date",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"entryDate\": \"2026-10-17\",\n  \"memo\": \"Wrong entry\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions/{{mistakeId}}/reverse"
+          }
+        }
+      ]
+    },
+    {
+      "name": "6. Plans for next month",
+      "item": [
+        {
+          "name": "Sign in again (tokens last 15 minutes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "A task that's already late",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"ভ্যাট রিটার্ন জমা দিন\",\n  \"priority\": \"HIGH\",\n  \"dueAt\": \"2026-10-15T04:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "A task for later",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Renew trade license\",\n  \"dueAt\": \"2030-01-15T04:00:00.000Z\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/tasks"
+          }
+        },
+        {
+          "name": "A monthly reminder",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"দোকান ভাড়া দিন\",\n  \"startsAt\": \"2030-01-04T03:00:00.000Z\",\n  \"rrule\": \"FREQ=MONTHLY;BYMONTHDAY=4\",\n  \"leadMinutes\": 1440\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reminders"
+          }
+        },
+        {
+          "name": "A monthly salary schedule, starting today",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"today\", new Date(Date.now() + 6 * 3600000).toISOString().slice(0, 10));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"কর্মীদের বেতন\",\n  \"kind\": \"SALARY\",\n  \"rrule\": \"FREQ=MONTHLY;BYMONTHDAY=-1\",\n  \"startDate\": \"{{today}}\",\n  \"accountId\": \"{{bankId}}\",\n  \"amountMinor\": \"6500000\",\n  \"remindDaysBefore\": 3\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/recurring-schedules"
+          }
+        }
+      ]
+    },
+    {
+      "name": "7. Import the bank statement (needs the worker)",
+      "item": [
+        {
+          "name": "Sign in again (tokens last 15 minutes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "A rule: bank charges categorize themselves",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Bank charges\",\n  \"containsText\": \"service charge\",\n  \"direction\": \"OUT\",\n  \"categoryId\": \"{{catBankMFSCharges}}\",\n  \"autoPost\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-rules"
+          }
+        },
+        {
+          "name": "Start the upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "const upload = pm.response.json().data;",
+                  "pm.collectionVariables.set(\"statementUrl\", upload.uploadUrl);",
+                  "pm.collectionVariables.set(\"statementId\", upload.document.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"STATEMENT\",\n  \"fileName\": \"city-bank-october.csv\",\n  \"mime\": \"text/csv\",\n  \"sizeBytes\": 1250\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/documents/uploads"
+          }
+        },
+        {
+          "name": "Send the CSV file",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/csv"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "City Bank PLC,,,,,\nStatement of account: October 2026,,,,,\nDate,Particulars,Ref,Withdrawal,Deposit,Balance\n01/10/2026,\"Transfer to cash\",TRF-1,50000.00,,450000.00\n02/10/2026,\"Stock from Noor Traders\",PO-501,85000.00,,365000.00\n04/10/2026,\"দোকান ভাড়া, অক্টোবর\",CHQ-7701,30000.00,,335000.00\n05/10/2026,\"Wholesale order, Rahman Stores\",INV-3001,,45000.00,380000.00\n09/10/2026,\"বিদ্যুৎ বিল, সেপ্টেম্বর\",DESCO-1,6820.00,,373180.00\n10/10/2026,\"Wholesale order, Karim & Sons\",INV-3002,,62500.00,435680.00\n14/10/2026,\"Stock from Noor Traders\",PO-502,64300.00,,371380.00\n18/10/2026,\"Wholesale order, Dhaka Mart\",INV-3003,,38200.00,409580.00\n20/10/2026,\"Transfer to bKash\",TRF-2,10000.00,,399580.00\n20/10/2026,\"Transfer fee\",TRF-2F,18.50,,399561.50\n25/10/2026,\"Internet bill\",ISP-10,2150.00,,397411.50\n27/10/2026,\"Wholesale order, Rahman Stores\",INV-3004,,51000.00,448411.50\n28/10/2026,\"Stock from Noor Traders\",PO-503,41750.00,,406661.50\n29/10/2026,\"CASH DEPOSIT, BRANCH\",,,1500.00,408161.50\n31/10/2026,\"অক্টোবরের বেতন, ৩ জন কর্মী\",SAL-OCT,65000.00,,343161.50\n31/10/2026,\"BANK SERVICE CHARGE\",,230.00,,342931.50\nClosing balance,,,,,342931.50\n"
+            },
+            "url": "{{statementUrl}}"
+          }
+        },
+        {
+          "name": "Finish the upload",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/documents/{{statementId}}/complete"
+          }
+        },
+        {
+          "name": "See its columns, and a suggested mapping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"finds the heading row\", () => pm.expect(pm.response.json().data.suggestion.headerRow).to.eql(3));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentId\": \"{{statementId}}\",\n  \"financialAccountId\": \"{{bankId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-imports/preview"
+          }
+        },
+        {
+          "name": "Preview it with the mapping",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const r = pm.response.json().data.result;",
+                  "pm.test(\"reads every row, with balances that add up\", () => { pm.expect(r.readableRows).to.eql(16); pm.expect(r.failedRows).to.eql(0); pm.expect(r.balanceBreaks).to.eql(0); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentId\": \"{{statementId}}\",\n  \"financialAccountId\": \"{{bankId}}\",\n  \"mapping\": {\n    \"headerRow\": 3,\n    \"dateColumn\": \"Date\",\n    \"dateFormat\": \"DD/MM/YYYY\",\n    \"descriptionColumn\": \"Particulars\",\n    \"referenceColumn\": \"Ref\",\n    \"debitColumn\": \"Withdrawal\",\n    \"creditColumn\": \"Deposit\",\n    \"balanceColumn\": \"Balance\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-imports/preview"
+          }
+        },
+        {
+          "name": "Import it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.expect([202]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"importId\", pm.response.json().data.id);",
+                  "pm.collectionVariables.set(\"importTries\", \"0\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"documentId\": \"{{statementId}}\",\n  \"financialAccountId\": \"{{bankId}}\",\n  \"mapping\": {\n    \"headerRow\": 3,\n    \"dateColumn\": \"Date\",\n    \"dateFormat\": \"DD/MM/YYYY\",\n    \"descriptionColumn\": \"Particulars\",\n    \"referenceColumn\": \"Ref\",\n    \"debitColumn\": \"Withdrawal\",\n    \"creditColumn\": \"Deposit\",\n    \"balanceColumn\": \"Balance\"\n  }\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-imports"
+          }
+        },
+        {
+          "name": "Wait for the worker to finish",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 5000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const row = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get(\"importTries\")) + 1;",
+                  "pm.collectionVariables.set(\"importTries\", String(tries));",
+                  "if (row.status !== \"COMPLETED\" && row.status !== \"FAILED\" && tries < 60) {",
+                  "  postman.setNextRequest(pm.info.requestName);",
+                  "} else {",
+                  "  pm.test(\"finished. If this fails, start the worker: npm run worker\", () => pm.expect(row.status).to.eql(\"COMPLETED\"));",
+                  "  pm.test(\"added every row\", () => pm.expect(row.newLines).to.eql(16));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-imports/{{importId}}"
+          }
+        },
+        {
+          "name": "Only the unknown deposit should be left",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const items = pm.response.json().data.items;",
+                  "pm.test(\"everything else matched itself\", () => { pm.expect(items.length).to.eql(1); pm.expect(items[0].description).to.eql(\"CASH DEPOSIT, BRANCH\"); });",
+                  "if (items[0]) pm.collectionVariables.set(\"unknownLineId\", items[0].id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-lines?status=UNMATCHED&financialAccountId={{bankId}}"
+          }
+        },
+        {
+          "name": "Say what the unknown deposit was",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"settled\", () => pm.expect(pm.response.json().data.status).to.eql(\"MATCHED\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"categoryId\": \"{{catOtherIncome}}\",\n  \"postNow\": true,\n  \"description\": \"Scrap sold, paid in at the branch\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-lines/{{unknownLineId}}/categorize"
+          }
+        },
+        {
+          "name": "Nothing is left in the inbox",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"all settled\", () => { const d = pm.response.json().data; pm.expect(d.unmatched).to.eql(0); pm.expect(d.matched).to.eql(16); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/statement-lines/summary?financialAccountId={{bankId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "8. Reconcile the bank",
+      "item": [
+        {
+          "name": "Sign in again (tokens last 15 minutes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "Start, with the statement's closing balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 201\", () => pm.expect([201]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"recId\", pm.response.json().data.id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"financialAccountId\": \"{{bankId}}\",\n  \"statementDate\": \"2026-10-31\",\n  \"statementBalanceMinor\": \"34293150\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reconciliations"
+          }
+        },
+        {
+          "name": "Clear everything already matched",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"cleared them\", () => pm.expect(pm.response.json().data.applied).to.be.greaterThan(15));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reconciliations/{{recId}}/apply-statement-matches"
+          }
+        },
+        {
+          "name": "What's left is the opening balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"the difference is the opening balance\", () => pm.expect(d.differenceMinor).to.eql(\"50000000\"));",
+                  "pm.collectionVariables.set(\"openingLineId\", d.unmatchedLines.find((line) => line.debitMinor === \"50000000\").id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reconciliations/{{recId}}"
+          }
+        },
+        {
+          "name": "Tick the opening balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"the books now match the bank\", () => pm.expect(pm.response.json().data.differenceMinor).to.eql(\"0\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"journalLineIds\": [\n    \"{{openingLineId}}\"\n  ]\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reconciliations/{{recId}}/lines"
+          }
+        },
+        {
+          "name": "Close it",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reconciliations/{{recId}}/close"
+          }
+        }
+      ]
+    },
+    {
+      "name": "9. Read the results: these are the ones to look at",
+      "item": [
+        {
+          "name": "Sign in again (tokens last 15 minutes)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"demoToken\", pm.response.json().data.accessToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "noauth"
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{demoEmail}}\",\n  \"password\": \"{{demoPassword}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/auth/login"
+          }
+        },
+        {
+          "name": "Profit & Loss for October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"revenue\", () => pm.expect(d.revenue.totalMinor).to.eql(\"34370050\"));",
+                  "pm.test(\"expenses, with the reversed mistake gone\", () => pm.expect(d.expenses.totalMinor).to.eql(\"31098925\"));",
+                  "pm.test(\"net profit\", () => pm.expect(d.netProfitMinor).to.eql(\"3271125\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reports/profit-and-loss?from=2026-10-01&to=2026-10-31"
+          }
+        },
+        {
+          "name": "Balance Sheet on 31 October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"it balances\", () => pm.expect(d.balanced).to.eql(true));",
+                  "pm.test(\"assets\", () => pm.expect(d.assets.totalMinor).to.eql(\"55771125\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reports/balance-sheet?asOf=2026-10-31"
+          }
+        },
+        {
+          "name": "Trial Balance on 31 October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"debits equal credits\", () => pm.expect(d.totalDebitMinor).to.eql(d.totalCreditMinor));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reports/trial-balance?asOf=2026-10-31"
+          }
+        },
+        {
+          "name": "Cash Flow for October",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"it adds up\", () => pm.expect(d.balanced).to.eql(true));",
+                  "pm.test(\"ending cash\", () => pm.expect(d.endingCashMinor).to.eql(\"55771125\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/reports/cash-flow?from=2026-10-01&to=2026-10-31"
+          }
+        },
+        {
+          "name": "Account balances",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const accounts = pm.response.json().data;",
+                  "const balance = (name) => accounts.find((account) => account.name === name).currentBalanceMinor;",
+                  "pm.test(\"City Bank\", () => pm.expect(balance(\"City Bank\")).to.eql(\"34293150\"));",
+                  "pm.test(\"bKash\", () => pm.expect(balance(\"bKash Merchant\")).to.eql(\"6240050\"));",
+                  "pm.test(\"Cash\", () => pm.expect(accounts.find((account) => account.type === \"CASH\").currentBalanceMinor).to.eql(\"15237925\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/accounts"
+          }
+        },
+        {
+          "name": "Dashboard",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const d = pm.response.json().data;",
+                  "pm.test(\"agrees with the reports\", () => { pm.expect(d.revenueMinor).to.eql(\"34370050\"); pm.expect(d.netProfitMinor).to.eql(\"3271125\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/analytics/dashboard?fromMonth=2026-10&toMonth=2026-10"
+          }
+        },
+        {
+          "name": "Budget against actuals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const lines = pm.response.json().data.lines;",
+                  "const spent = (name) => lines.find((line) => line.category.name === name).actualMinor;",
+                  "pm.test(\"rent and marketing\", () => { pm.expect(spent(\"Rent\")).to.eql(\"3000000\"); pm.expect(spent(\"Marketing\")).to.eql(\"830000\"); });"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/budgets/{{budgetId}}"
+          }
+        },
+        {
+          "name": "Goal progress",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/goals/{{goalId}}"
+          }
+        },
+        {
+          "name": "All transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/transactions?limit=100"
+          }
+        },
+        {
+          "name": "Journal entries",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/journals?limit=100"
+          }
+        },
+        {
+          "name": "Tasks: summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "pm.test(\"one overdue\", () => pm.expect(pm.response.json().data.overdue).to.eql(1));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/tasks/summary"
+          }
+        },
+        {
+          "name": "What's coming up",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/tasks/calendar?from=2030-01-01&to=2030-01-31"
+          }
+        },
+        {
+          "name": "Your notifications (the worker makes these)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/notifications"
+          }
+        },
+        {
+          "name": "Request a Bangla PDF of the Profit & Loss",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", () => pm.expect([202]).to.include(pm.response.code));",
+                  "pm.collectionVariables.set(\"exportId\", pm.response.json().data.id);",
+                  "pm.collectionVariables.set(\"exportTries\", \"0\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"report\": \"PROFIT_AND_LOSS\",\n  \"format\": \"PDF\",\n  \"from\": \"2026-10-01\",\n  \"to\": \"2026-10-31\",\n  \"locale\": \"bn-BD\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/report-exports"
+          }
+        },
+        {
+          "name": "Wait for the PDF",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 4000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));",
+                  "const row = pm.response.json().data;",
+                  "const tries = Number(pm.collectionVariables.get(\"exportTries\")) + 1;",
+                  "pm.collectionVariables.set(\"exportTries\", String(tries));",
+                  "if (row.status !== \"READY\" && row.status !== \"FAILED\" && tries < 30) postman.setNextRequest(pm.info.requestName);",
+                  "else pm.test(\"ready\", () => pm.expect(row.status).to.eql(\"READY\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/report-exports/{{exportId}}"
+          }
+        },
+        {
+          "name": "Get its download link: open it in a browser",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", () => pm.expect([200]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/businesses/{{demoBusinessId}}/report-exports/{{exportId}}/download"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10. Ask the AI (needs AI_API_KEY)",
+      "item": [
+        {
+          "name": "English: profit",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 1000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or 503\", () => pm.expect([200,503]).to.include(pm.response.code));",
+                  "if (pm.response.code === 200) pm.test(\"says the true figure, ৳32,711.25\", () => pm.expect(pm.response.json().data.content.replace(/,/g, \"\")).to.include(\"32711.25\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What was my net profit in October 2026?\",\n  \"businessId\": \"{{demoBusinessId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/ai/chat"
+          }
+        },
+        {
+          "name": "Bangla: biggest expense",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 30000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or 503\", () => pm.expect([200,503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"অক্টোবর ২০২৬ এ কোন খাতে সবচেয়ে বেশি খরচ হয়েছে?\",\n  \"businessId\": \"{{demoBusinessId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/ai/chat"
+          }
+        },
+        {
+          "name": "Bangla: bank balance",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 30000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or 503\", () => pm.expect([200,503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"আমার ব্যাংকে এখন কত টাকা আছে?\",\n  \"businessId\": \"{{demoBusinessId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/ai/chat"
+          }
+        },
+        {
+          "name": "Ask it to record something: it only suggests",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(() => {}, 30000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 or 503\", () => pm.expect([200,503]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{demoToken}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Record a transport expense of 500 taka from cash on 31 October 2026.\",\n  \"businessId\": \"{{demoBusinessId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/v1/ai/chat"
+          }
+        }
+      ]
+    }
+  ]
+}
