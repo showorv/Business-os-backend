@@ -5,6 +5,7 @@ import { findUnsupportedNumbers, looksLikeInjection, numbersIn } from "../src/ap
 import { detectLanguage } from "../src/app/ai/orchestrator.js";
 import { chatProvider, ProviderError } from "../src/app/ai/provider.js";
 import { env } from "../src/app/config/env.config.js";
+import { toolDefinitions } from "../src/app/ai/tools.js";
 import { reportsService } from "../src/app/modules/reports/reports.service.js";
 import { membersService } from "../src/app/modules/members/members.service.js";
 import { prisma } from "../src/lib/prisma.js";
@@ -96,6 +97,56 @@ describe("what the model says goes through the check", () => {
   });
 });
 
+describe("the period can be stated, as the model is told to", () => {
+  it("each period tool returns its dates, so they pass the number check", async () => {
+    const { f } = await seedEvalBooks();
+    const compare = { metric: "REVENUE", ...NOV, compareFrom: "2026-10-01", compareTo: "2026-10-31" };
+    for (const [tool, args] of [["get_pnl", NOV], ["cash_flow", NOV], ["expense_by_category", NOV], ["compare_periods", compare]] as const) {
+      fakeModel.replies.push(callTool(tool, args), (messages) => {
+        expect(lastToolResult(messages).period).toEqual(NOV);
+        return say("For 1 Nov 2026 to 30 Nov 2026.");
+      });
+      const res = await chat(f.auth, "x", { businessId: f.businessId });
+      expect(res.body.data.guardStatus, tool).toBe("ok");
+    }
+  });
+});
+
+describe("what the real model got wrong in the first evaluation", () => {
+  it("overlapping periods are refused, so it has to ask again", async () => {
+    const { f } = await seedEvalBooks();
+    fakeModel.replies.push(
+      callTool("compare_periods", { metric: "REVENUE", from: "2026-10-01", to: "2026-11-30", compareFrom: "2026-10-01", compareTo: "2026-11-01" }),
+      (messages) => {
+        expect(lastToolResult(messages)).toEqual({ error: "PERIODS_OVERLAP" });
+        return callTool("compare_periods", { metric: "REVENUE", ...NOV, compareFrom: "2026-10-01", compareTo: "2026-10-31" });
+      },
+      (messages) => {
+        expect(lastToolResult(messages).businesses[0]).toMatchObject({ current: "৳5,00,000.00", previous: "৳3,00,000.00", change: "৳2,00,000.00", changePercent: "66.67" });
+        return say("Revenue rose by ৳2,00,000.00, or 66.67%.");
+      },
+    );
+    const res = await chat(f.auth, "Compare November with October", { businessId: f.businessId });
+    expect(res.body.data.guardStatus).toBe("ok");
+  });
+
+  it("upcoming payments use the local date, and come with a total", async () => {
+    const { f } = await seedEvalBooks();
+    const { todayInTimezone } = await import("../src/app/utils/dates.js");
+    fakeModel.replies.push(callTool("upcoming_obligations", { days: 40 }), (messages) => {
+      const result = lastToolResult(messages);
+      expect(result.payments[0].date).toBe(todayInTimezone("Asia/Dhaka"));
+      expect(result.payments.length).toBeGreaterThanOrEqual(1);
+      const expected = BigInt(result.payments.length) * 60_000n;
+      expect(numbersIn(result.totalToPayByCurrency[0])[0]).toBe(expected.toString());
+      expect(result.payments[0]).not.toHaveProperty("amountMinor");
+      return say(`Total ${result.totalToPayByCurrency[0]}`);
+    });
+    const res = await chat(f.auth, "What's coming up?", { businessId: f.businessId });
+    expect(res.body.data.guardStatus).toBe("ok");
+  });
+});
+
 describe("language", () => {
   it("answers follow the question", () => {
     expect(detectLanguage("আমার আয় কত?")).toBe("bn");
@@ -133,7 +184,7 @@ describe("the tools agree with the formal reports", () => {
 
     fakeModel.replies.push(callTool("cash_flow", NOV), (messages) => say(JSON.stringify(lastToolResult(messages))));
     const second = await chat(f.auth, "x", { businessId: f.businessId });
-    const cash = JSON.parse(second.body.data.content)[0];
+    const cash = JSON.parse(second.body.data.content).businesses[0];
     expect(numbersIn(cash.netChange)[0]).toBe(String(Number(flow.netChangeMinor) / 100));
     expect(numbersIn(cash.endingCash)[0]).toBe(String(Number(flow.endingCashMinor) / 100));
   });
@@ -487,10 +538,55 @@ describe("the real connection code, against a local stand-in for the AI company"
     expect(received.body).toMatchObject({ temperature: 0, tool_choice: "auto", messages: [{ role: "assistant", tool_calls: [{ id: "a", type: "function" }] }, { role: "tool", tool_call_id: "a" }], tools: [{ type: "function", function: { name: "get_pnl" } }] });
   });
 
+  it("waits and tries again when told to wait briefly", async () => {
+    let calls = 0;
+    await withServer(
+      (_req, res) => {
+        calls += 1;
+        if (calls === 1) return reply(res, 429, {}, { "retry-after": "1" });
+        reply(res, 200, { choices: [{ message: { content: "ok" } }] });
+      },
+      async (url) => {
+        const { chatProvider: real } = load(url);
+        expect((await real.chat([], [])).content).toBe("ok");
+      },
+    );
+    expect(calls).toBe(2);
+  });
+
+  it("gives up after a few short waits, and with no wait given", async () => {
+    let calls = 0;
+    await withServer(
+      (_req, res) => {
+        calls += 1;
+        reply(res, 429, {}, { "retry-after": "1" });
+      },
+      async (url) => {
+        const { chatProvider: real } = load(url);
+        await expect(real.chat([], [])).rejects.toMatchObject({ failure: "BUSY" });
+      },
+    );
+    expect(calls).toBe(3);
+
+    await withServer(
+      (_req, res) => reply(res, 429, {}),
+      async (url) => {
+        const { chatProvider: real } = load(url);
+        await expect(real.chat([], [])).rejects.toMatchObject({ failure: "BUSY" });
+      },
+    );
+  });
+
+  it("the tool descriptions stay small, because they count against the provider's limit", () => {
+    const size = JSON.stringify(toolDefinitions(true)).length;
+    expect(size).toBeLessThan(6500);
+    expect(JSON.stringify(toolDefinitions(true))).not.toContain("0000-0000");
+  });
+
   it("understands busy, a bad key and an outage", async () => {
     for (const [status, failure] of [[429, "BUSY"], [401, "NOT_CONFIGURED"], [500, "FAILED"]] as const) {
       await withServer(
-        (_req, res) => reply(res, status, {}, { "retry-after": "12" }),
+        (_req, res) => reply(res, status, {}, { "retry-after": "120" }),
         async (url) => {
           const { chatProvider: real } = load(url);
           await expect(real.chat([], [])).rejects.toMatchObject({ failure });

@@ -8,7 +8,7 @@ import { transactionsService } from "../modules/transactions/transactions.servic
 import { dateField, fromDbDate, toDbDate, addDays } from "../utils/dates.js";
 import { AppError } from "../utils/errors.js";
 import { formatMoney, percentOf } from "../utils/money.js";
-import { localTimeToUtc, nextOccurrence } from "../utils/rrule.js";
+import { localDateOf, localTimeToUtc, nextOccurrence } from "../utils/rrule.js";
 import { searchDocuments } from "./search.js";
 
 const PROPOSAL_DAYS = 7;
@@ -179,18 +179,21 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
   }),
 
   compare_periods: tool({
-    description: "Compare revenue, expenses or net profit between two date ranges. Gives the change and percent.",
+    description: "Compare revenue, expenses or net profit between two separate date ranges. Gives the change and percent. For November against October: from and to cover only November, compareFrom and compareTo cover only October.",
     schema: z.object({
       businessIds,
       metric: z.enum(["REVENUE", "EXPENSES", "NET_PROFIT"]),
-      from: dateField,
-      to: dateField,
-      compareFrom: dateField,
-      compareTo: dateField,
+      from: dateField.describe("First day of the period being asked about"),
+      to: dateField.describe("Last day of the period being asked about"),
+      compareFrom: dateField.describe("First day of the other period"),
+      compareTo: dateField.describe("Last day of the other period"),
     }),
     run: async (context, args) => {
       assertRange(args.from, args.to);
       assertRange(args.compareFrom, args.compareTo);
+      // A period compared with part of itself gives a real figure with a false meaning, which the number
+      // check can't catch. Refusing makes the model ask again with the right dates.
+      if (args.from <= args.compareTo && args.compareFrom <= args.to) throw new ToolRefusal("PERIODS_OVERLAP");
       const chosen = pickBusinesses(context, args.businessIds, Permission.FINANCE_READ);
       return readAs(context, chosen, async (tx, ids) => {
         const names = await businessNames(tx);
@@ -200,7 +203,10 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
         return {
           rowCount: current.length,
           source: posted("compare_periods", chosen, names, { period: `${args.from} to ${args.to}, against ${args.compareFrom} to ${args.compareTo}` }),
-          data: current.map((row, index) => {
+          data: {
+            period: { from: args.from, to: args.to },
+            comparedWith: { from: args.compareFrom, to: args.compareTo },
+            businesses: current.map((row, index) => {
             const now = pick(row);
             const before = pick(previous[index]!);
             const currency = row.business.baseCurrency;
@@ -213,7 +219,8 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
               // No percentage against nothing.
               changePercent: percentOf(now - before, before < 0n ? -before : before),
             };
-          }),
+            }),
+          },
         };
       });
     },
@@ -314,7 +321,10 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
         return {
           rowCount: chosen.length,
           source: posted("cash_flow", chosen, names, { period: `${args.from} to ${args.to}` }),
-          data: chosen.map((business) => {
+          data: {
+            // The model is told to state the period, so these dates must be among the figures it may use.
+            period: { from: args.from, to: args.to },
+            businesses: chosen.map((business) => {
             const of = (name: string) => BigInt(flows.find((row) => row.business_id === business.businessId && row.cash_flow_class === name)?.net ?? 0);
             const currency = business.baseCurrency;
             const net = of("OPERATING") + of("INVESTING") + of("FINANCING");
@@ -326,7 +336,8 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
               netChange: money(context, net, currency),
               endingCash: money(context, BigInt(ending.find((row) => row.business_id === business.businessId)?.closing ?? 0), currency),
             };
-          }),
+            }),
+          },
         };
       });
     },
@@ -360,18 +371,27 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
             name: schedule.name,
             kind: schedule.kind,
             direction: schedule.type,
-            date: date.toISOString().slice(0, 10),
+            // The local date: midnight in Dhaka is still the day before in UTC.
+            date: localDateOf(date, schedule.timezone),
             amount: money(context, schedule.amount_minor, currencyOf(chosen, schedule.business_id)),
+            amountMinor: schedule.amount_minor,
+            currency: currencyOf(chosen, schedule.business_id),
+            isPayment: schedule.type !== "INCOME",
           }));
         });
         payments.sort((a, b) => a.date.localeCompare(b.date));
+        // Added up here, so the model never has to.
+        const totals = totalsByCurrency(payments.filter((payment) => payment.isPayment).map((payment) => ({ currency: payment.currency, amount: payment.amountMinor })));
 
         return {
           rowCount: payments.length + reminders.length,
           source: { ...posted("upcoming_obligations", chosen, names, { period: `next ${args.days} days` }), basis: "PLAN" as const },
           data: {
             days: args.days,
-            payments,
+            // The model tends to say when the window ends, so that date must be among what it may use.
+            period: { from: localDateOf(now, chosen[0]!.timezone), to: localDateOf(until, chosen[0]!.timezone) },
+            payments: payments.map(({ amountMinor: _amountMinor, currency: _currency, isPayment: _isPayment, ...payment }) => payment),
+            totalToPayByCurrency: [...totals].map(([currency, amount]) => money(context, amount, currency)),
             reminders: reminders.map((reminder) => ({ business: names.get(reminder.business_id), title: reminder.title, date: reminder.next_occurrence_at.toISOString().slice(0, 10) })),
           },
         };
@@ -628,11 +648,23 @@ export const runTool = async (name: string, rawArguments: string, context: ToolC
   }
 };
 
+// Every word here counts against the provider's limit on each call. The server checks arguments itself,
+// so the model doesn't need the long patterns the schema library writes out, such as for each id.
+const compactSchema = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(compactSchema);
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key, inner]) => !["$schema", "pattern", "additionalProperties"].includes(key) || typeof inner === "object")
+      .map(([key, inner]) => [key, compactSchema(inner)]),
+  );
+};
+
 export const toolDefinitions = (includeProposals: boolean) =>
   Object.entries(TOOLS)
     .filter(([, spec]) => includeProposals || !spec.proposes)
     .map(([name, spec]) => ({
       name,
       description: spec.description,
-      parameters: z.toJSONSchema(spec.schema, { target: "draft-7", io: "input" }),
+      parameters: compactSchema(z.toJSONSchema(spec.schema, { target: "draft-7", io: "input" })) as object,
     }));

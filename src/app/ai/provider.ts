@@ -62,32 +62,46 @@ interface WireResponse {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 }
 
-const openAiCompatible: ChatProvider = {
-  chat: async (messages, tools) => {
-    if (!env.AI_API_KEY) throw new ProviderError("NOT_CONFIGURED");
+// A free plan's per-minute limit often clears within seconds, and a short wait beats an error. A longer
+// one, such as the day's limit being used up, is reported straight away instead of holding the request.
+const MAX_WAIT_SECONDS = 30;
+const MAX_ATTEMPTS = 3;
 
+const send = async (requestBody: string): Promise<Response> => {
+  for (let attempt = 1; ; attempt += 1) {
     let response: Response;
     try {
       response = await fetch(`${env.AI_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${env.AI_API_KEY}` },
-        body: JSON.stringify({
-          model: env.AI_CHAT_MODEL,
-          temperature: 0,
-          messages: messages.map(toWire),
-          ...(tools.length > 0
-            ? { tools: tools.map(({ name, description, parameters }) => ({ type: "function", function: { name, description, parameters } })), tool_choice: "auto" }
-            : {}),
-        }),
+        body: requestBody,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch {
       throw new ProviderError("FAILED");
     }
+    if (response.status !== 429) return response;
 
-    if (response.status === 429) {
-      throw new ProviderError("BUSY", Number(response.headers.get("retry-after")) || undefined);
-    }
+    const retryAfter = Number(response.headers.get("retry-after")) || undefined;
+    if (attempt >= MAX_ATTEMPTS || retryAfter === undefined || retryAfter > MAX_WAIT_SECONDS) throw new ProviderError("BUSY", retryAfter);
+    await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000));
+  }
+};
+
+const openAiCompatible: ChatProvider = {
+  chat: async (messages, tools) => {
+    if (!env.AI_API_KEY) throw new ProviderError("NOT_CONFIGURED");
+
+    const response = await send(
+      JSON.stringify({
+        model: env.AI_CHAT_MODEL,
+        temperature: 0,
+        messages: messages.map(toWire),
+        ...(tools.length > 0
+          ? { tools: tools.map(({ name, description, parameters }) => ({ type: "function", function: { name, description, parameters } })), tool_choice: "auto" }
+          : {}),
+      }),
+    );
     if (!response.ok) throw new ProviderError(response.status === 401 || response.status === 403 ? "NOT_CONFIGURED" : "FAILED");
 
     const body = (await response.json()) as WireResponse;

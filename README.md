@@ -334,9 +334,24 @@ Two clicks create one transaction. Suggestions expire after 7 days, and only the
 |---|---|---|
 | **Proves** | The right tool gives the right figure, and the checks hold | The real AI picks the right tool and writes it correctly |
 | **Needs** | Nothing | `AI_API_KEY` |
-| **Cost** | None | Uses your daily quota, so it runs 12 questions by default |
+| **Cost** | None | Uses your daily quota, so it runs 12 questions by default, 30 seconds apart |
 
-The real run saves `evaluation/last-report.json`, with each question, answer and result. Set `AI_EVAL_LIMIT=52` for all of them, but that can use most of a day's free quota.
+The real run saves `evaluation/last-report.json`, with each question, answer and result. `AI_EVAL_IDS=cmp-1,doc-2` runs just those, and `AI_EVAL_LIMIT=52` runs all of them, which uses most of a day's free quota and takes about 30 minutes.
+
+### What the real AI found
+Running it against Groq found problems the scripted tests couldn't, because they only appear when a real model makes its own choices:
+
+| What happened | Why it matters | Fix |
+|---|---|---|
+| Only the first question worked, then Groq refused the rest | One question used about 5,200 tokens, and the free plan allows 8,000 a minute | Tool descriptions cut by 40%, to about 3,500 tokens a question. The app now waits and retries when told to wait up to 30 seconds |
+| It compared 1 Oct to 30 Nov with 1 Oct to 1 Nov, and called ৳8,00,000 "November revenue" | **A wrong answer that passed the number check,** because the tool really returned that figure | The tool refuses overlapping periods, and each result states its own period |
+| Correct answers failed the number check for stating a date | It was right to state the period, but the tools didn't return those dates | Period tools now return their dates |
+| A payment due on the 5th showed as the 4th | Midnight in Dhaka is still the previous day in UTC | Uses the local date |
+| Asked about "that other business", it answered about your own | It wasn't a leak, but it was misleading | It's now told to say it can't see that business, and did |
+
+**What the number check can't do:** it proves a figure came from a tool, not that it was the right tool or period for the question. So the answer's `sources` state the period, and the frontend should show them.
+
+**Free plan limits in practice:** at about 3,500 tokens a question, Groq's 200,000 a day allows roughly 55 questions, and 8,000 a minute allows about 2 a minute. A question that needs a proposal uses about 6,500. A busy minute waits or returns `AI_PROVIDER_BUSY`. These were measured on small test books, and larger results use more.
 
 ### New settings in `.env`
 | Setting | Purpose |
@@ -1228,11 +1243,12 @@ docker exec business_os_redis redis-cli flushall
 ## How it was verified
 
 **Phase 8:**
-- **729 integration tests pass** (123 of them new), using a scripted stand-in for the AI company.
+- **735 integration tests pass** (129 of them new), using a scripted stand-in for the AI company.
 - **The real embedding model and OCR ran on this Mac** (`npm run test:models`, 9 tests). Bangla questions found English passages and the other way round, and OCR read Bangla from an image and a PDF.
 - **The real API and worker were run together,** with the real models and a local stand-in for Groq over real HTTP. A real English PDF, Bangla PDF and scan were all read in about 4 seconds, and the searches above found the right documents. All 333 Postman requests pass with 519 assertions, reaching all 170 documented operations, and no jobs failed.
 - **As a role like Neon's owner:** the suite passes, on a database upgraded from Phase 7's tables. The migration adds tables, views and a role, and doesn't change existing rows.
 - **The protections were proven real:** switching off RLS on `ai_messages` or `document_chunks`, giving the AI's role access to a table, or removing the business filter from a view each makes the tests fail. Switching off RLS on `ai_proposals` didn't at first, because the code checks too, so a test now checks the database directly.
+- **The real AI was tested with Groq's `openai/gpt-oss-120b`, on 23 of the 52 questions, 9 of them in Bangla.** The first 12 scored 11. After fixing what they found, all 23 passed on their most recent run, though not all in one run. See [what the real AI found](#what-the-real-ai-found).
 - **Testing caught three real problems:**
   - When OCR couldn't download its data, it crashed the whole worker, not just one job. Fixed, and the language data now ships with the app, so OCR needs no internet.
   - Text stored in a Bangla PDF came out broken, so those pages now go through OCR.
@@ -1294,7 +1310,7 @@ docker exec business_os_redis redis-cli flushall
 - **A Redis outage was tested**: login still works and `/health/ready` returns 503.
 
 **Not verified:**
-- **The real AI has never answered a question,** because there's no key yet. Tool choice, Bangla wording and the real pass rate are unknown until you run `npm run ai:eval`. Everything around the model is tested.
+- **29 of the 52 evaluation questions haven't been tried with the real AI,** to save the day's quota. Run them with `AI_EVAL_LIMIT=52 npm run ai:eval` on a fresh day.
 - **Real scanned documents.** OCR was tested on clean text rendered by a browser. A phone photo of a crumpled receipt will read worse.
 - **A real ClamAV server.** The scanner's protocol was tested against a local stand-in.
 - **The Phase 8 migration on Neon,** including `pgvector` there and the `readonly_ai` role.

@@ -8,6 +8,9 @@ import { resetDatabase } from "./helpers/db.js";
 // tests/ai-real-models.test.ts and the live evaluation run with the real ones.
 if (!process.env.RUN_MODEL_TESTS) {
   vi.doMock("../src/lib/embeddings.js", () => import("./helpers/fake-models.js"));
+}
+// The live evaluation is about the AI, so its lease "scan" still uses the stand-in rather than real OCR.
+if (!process.env.RUN_MODEL_TESTS || process.env.AI_EVAL_LIVE) {
   vi.doMock("../src/lib/ocr.js", () => import("./helpers/fake-ocr.js"));
 }
 

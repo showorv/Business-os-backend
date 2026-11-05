@@ -11,8 +11,8 @@ import { LEASE_TEXT, seedEvalBooks } from "./helpers/eval-books.js";
 const LIVE = Boolean(process.env.AI_EVAL_LIVE);
 // The whole set uses most of a day's free quota, so a live run samples it unless told otherwise.
 const LIVE_LIMIT = Number(process.env.AI_EVAL_LIMIT ?? 12);
-// Groq's free plan allows 8,000 tokens a minute, so a live run spaces its questions out.
-const LIVE_PAUSE_MS = Number(process.env.AI_EVAL_PAUSE_MS ?? 15_000);
+// Groq's free plan allows 8,000 tokens a minute, and a question uses several thousand.
+const LIVE_PAUSE_MS = Number(process.env.AI_EVAL_PAUSE_MS ?? 30_000);
 
 if (LIVE) {
   // .env.test has no key on purpose. A live run borrows only the AI settings from your own .env.
@@ -101,10 +101,13 @@ if (!LIVE) {
 
       // An even spread: both languages and every kind of question.
       const step = Math.max(1, Math.floor(QUESTIONS.length / LIVE_LIMIT));
-      const sample = QUESTIONS.filter((_question, index) => index % step === 0).slice(0, LIVE_LIMIT);
+      // AI_EVAL_IDS=cf-3,doc-1 runs just those.
+      const chosenIds = process.env.AI_EVAL_IDS?.split(",");
+      const sample = chosenIds ? QUESTIONS.filter((question) => chosenIds.includes(question.id)) : QUESTIONS.filter((_question, index) => index % step === 0).slice(0, LIVE_LIMIT);
       const results = [];
 
-      for (const question of sample) {
+      for (const [index, question] of sample.entries()) {
+        if (index > 0) await new Promise((resolve) => setTimeout(resolve, LIVE_PAUSE_MS));
         const res = await chat(books.f.auth, question.question);
         if (res.status !== 200) {
           results.push({ id: question.id, question: question.question, passed: false, reason: `HTTP ${res.status} ${res.body.error?.code}` });
@@ -123,7 +126,6 @@ if (!LIVE) {
         if (question.outcome === "PROPOSAL" && data.proposals.length !== 1) problems.push("no proposal");
 
         results.push({ id: question.id, language: question.language, question: question.question, passed: problems.length === 0, problems, tools, guard: data.guardStatus, answer: data.content, tokens: data.usage });
-        await new Promise((resolve) => setTimeout(resolve, LIVE_PAUSE_MS));
       }
 
       const passed = results.filter((result) => result.passed).length;
