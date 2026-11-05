@@ -354,6 +354,15 @@ Running it against Groq found problems the scripted tests couldn't, because they
 
 **Free plan limits in practice:** at about 3,500 tokens a question, Groq's 200,000 a day allows roughly 55 questions, and 8,000 a minute allows about 2 a minute. A question that needs a proposal uses about 6,500. A busy minute waits or returns `AI_PROVIDER_BUSY`. These were measured on small test books, and larger results use more.
 
+### Installing on a Linux server
+On Linux, the embedding model's runtime also tries to download graphics card (CUDA) files from Microsoft during `npm ci`. The app doesn't use them, and the download can time out, which is what first failed in GitHub Actions. Skip it:
+
+```bash
+ONNXRUNTIME_NODE_INSTALL=skip npm ci
+```
+
+This was tested in a Linux container: the install succeeded and the model still worked. The CI workflow already sets it.
+
 ### New settings in `.env`
 | Setting | Purpose |
 |---|---|
