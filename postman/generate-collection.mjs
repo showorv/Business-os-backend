@@ -239,6 +239,11 @@ pm.collectionVariables.set("ownerMemberId", m[0].id);`] }),
       body: { name: "Finance Owner", email: "{{financeEmail}}", password: "{{password}}" },
       tests: [status(201), `pm.collectionVariables.set("financeToken", pm.response.json().data.accessToken);`],
     }),
+    // Access tokens last 15 minutes. Send this whenever a later request answers TOKEN_EXPIRED.
+    req("Sign in again as the finance owner", "POST", `${A}/login`, {
+      body: { email: "{{financeEmail}}", password: "{{password}}" },
+      tests: [status(200), `pm.collectionVariables.set("financeToken", pm.response.json().data.accessToken);`],
+    }),
     req("Create business", "POST", B, { auth: "{{financeToken}}", body: { name: "Finance Traders", type: "RETAIL" }, tests: [status(201), `pm.collectionVariables.set("finBusinessId", pm.response.json().data.id);`] }),
     req("Seeded Cash account", "GET", `${FIN}/accounts`, { auth: "{{financeToken}}", tests: [status(200), `const a = pm.response.json().data;
 pm.test("one Cash account", () => { pm.expect(a.length).to.eql(1); pm.expect(a[0].type).to.eql("CASH"); });
