@@ -53,6 +53,9 @@ const transaction = z.object({
   journalEntryId: z.uuid().nullable(),
   reversalEntryId: z.uuid().nullable(),
   approvedBy: z.uuid().nullable(),
+  approvedAt: z.string().nullable(),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
 });
 
 const accounts = "/businesses/{businessId}/accounts";
@@ -70,7 +73,7 @@ addPath("Categories", { method: "patch", path: `${categories}/{categoryId}`, sum
 
 addPath("Transactions", { method: "post", path: transactions, summary: "Create a draft. Send Idempotency-Key to make retries safe. Needs finance.write", params: businessParams, body: transactionsValidation.create, response: transaction, status: 201, idempotent: true });
 addPath("Transactions", { method: "get", path: transactions, summary: "List with filters, newest date first. Needs finance.read", params: businessParams, query: transactionsValidation.listQuery, response: z.array(transaction) });
-addPath("Transactions", { method: "get", path: `${transactions}/{transactionId}`, summary: "Get one, with attachments. Needs finance.read", params: transactionParams, response: transaction.extend({ attachments: z.array(z.object({ documentId: z.uuid(), createdAt: z.string() })) }) });
+addPath("Transactions", { method: "get", path: `${transactions}/{transactionId}`, summary: "Get one, with attachments. Needs finance.read", params: transactionParams, response: transaction.extend({ attachments: z.array(z.object({ documentId: z.uuid(), createdAt: z.string(), fileName: z.string(), mime: z.string(), sizeBytes: z.number().int() })) }) });
 addPath("Transactions", { method: "patch", path: `${transactions}/{transactionId}`, summary: "Edit a draft. Needs finance.write", params: transactionParams, body: transactionsValidation.update, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/void`, summary: "Void a draft. It is kept, not deleted. Needs finance.write", params: transactionParams, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/post`, summary: "Post a draft to the ledger, or send it for approval if above the threshold. Needs ledger.post", params: transactionParams, response: transaction });

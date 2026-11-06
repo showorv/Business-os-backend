@@ -389,6 +389,8 @@ describe("attachments", () => {
 
     const read = await api().get(url).set("Authorization", f.auth);
     expect(read.body.data.attachments.map((item: { documentId: string }) => item.documentId)).toEqual([document.id]);
+    // The file's name comes with it, so a screen can list attachments without another call.
+    expect(read.body.data.attachments[0]).toMatchObject({ fileName: expect.any(String), mime: expect.any(String), sizeBytes: expect.any(Number) });
 
     // A document in use cannot be deleted.
     const blocked = await api().delete(`${f.base}/documents/${document.id}`).set("Authorization", f.auth);

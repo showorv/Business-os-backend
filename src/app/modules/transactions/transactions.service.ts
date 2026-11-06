@@ -332,15 +332,27 @@ const list = async (business: BusinessContext, query: IListTransactionsQuery) =>
   return { ...page, items: page.items.map(toDto) };
 };
 
+// Each attachment carries its file's name, type and size, so a screen can list it without another call.
 const getOne = async (business: BusinessContext, transactionId: string) => {
   const transaction = await withBusinessScope(business, (tx) =>
     tx.transaction.findFirst({
       where: { id: transactionId, businessId: business.businessId },
-      include: { attachments: { select: { documentId: true, createdAt: true } } },
+      include: {
+        attachments: {
+          select: { documentId: true, createdAt: true, document: { select: { fileName: true, mime: true, sizeBytes: true } } },
+          orderBy: { createdAt: "asc" },
+        },
+      },
     }),
   );
   if (!transaction) throw new AppError(404, ErrorCode.NOT_FOUND);
-  return toDto(transaction);
+  const attachments = transaction.attachments.map(({ document, ...attachment }) => ({
+    ...attachment,
+    fileName: document.fileName,
+    mime: document.mime,
+    sizeBytes: Number(document.sizeBytes),
+  }));
+  return toDto({ ...transaction, attachments });
 };
 
 // Locks the row, so two edits of one draft run one after the other.
