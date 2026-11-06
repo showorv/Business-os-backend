@@ -474,6 +474,8 @@ describe("manual journals", () => {
     const res = await api().get(`${f.base}/journals?ledgerAccountId=${rent}`).set("Authorization", f.auth);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].entryNo).toMatch(/^JE-2026-\d{6}$/);
+    // Each row carries its size, so the list needs no second request per entry.
+    expect(res.body.data[0]).toMatchObject({ totalMinor: "1", lineCount: 2, reversedBy: null });
   });
 });
 
@@ -916,6 +918,10 @@ describe("reconciliation", () => {
     const ids = view.body.data.unmatchedLines.map((item: { id: string }) => item.id);
     const matched = await api().post(`${url}/lines`).set("Authorization", f.auth).send({ journalLineIds: ids });
     expect(matched.body.data.differenceMinor).toBe("0");
+    const afterMatch = await api().get(url).set("Authorization", f.auth);
+    expect(afterMatch.body.data.unmatchedLines).toHaveLength(0);
+    expect(afterMatch.body.data.matchedLines.map((item: { id: string }) => item.id).sort()).toEqual([...ids].sort());
+    expect(afterMatch.body.data.account).toMatchObject({ id: f.bankId });
 
     const closed = await api().post(`${url}/close`).set("Authorization", f.auth).send({});
     expect(closed.status).toBe(200);
@@ -944,6 +950,9 @@ describe("reconciliation", () => {
     const closed = await api().post(`${url}/close`).set("Authorization", f.auth).send({ adjust: true });
     expect(closed.status).toBe(200);
     expect(closed.body.data.differenceMinor).toBe("-10");
+    // The finished view still says what was written off, while its live difference is now zero.
+    const after = await api().get(url).set("Authorization", f.auth);
+    expect(after.body.data).toMatchObject({ status: "CLOSED", closedDifferenceMinor: "-10", differenceMinor: "0" });
     expect(await journalLines(f.base, f.auth, closed.body.data.adjustmentEntryId)).toEqual([line("6900", "10", "0"), line("1110", "0", "10")]);
     expect(await balanceOf(f, f.bankId)).toBe("590");
   });

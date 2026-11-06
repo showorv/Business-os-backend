@@ -56,6 +56,12 @@ const journalLine = z.object({
   ledgerAccount: z.object({ id: z.uuid(), code: z.string(), name: z.string(), nameBn: z.string().nullable(), type: z.string() }),
 });
 
+const journalSummary = journal.extend({
+  totalMinor: z.string(),
+  lineCount: z.number(),
+  reversedBy: z.object({ id: z.uuid(), entryNo: z.string() }).nullable(),
+});
+
 const reconciliation = z.object({
   id: z.uuid(),
   financialAccountId: z.uuid(),
@@ -65,6 +71,26 @@ const reconciliation = z.object({
   bookBalanceMinor: z.string().nullable(),
   differenceMinor: z.string().nullable(),
   adjustmentEntryId: z.uuid().nullable(),
+});
+
+const balances = { clearedMinor: z.string(), bookBalanceMinor: z.string(), differenceMinor: z.string() };
+const reconciliationLine = z.object({
+  id: z.uuid(),
+  debitMinor: z.string(),
+  creditMinor: z.string(),
+  memo: z.string().nullable(),
+  entryNo: z.string(),
+  entryDate: z.string(),
+  entryMemo: z.string().nullable(),
+});
+const reconciliationDetail = reconciliation.omit({ bookBalanceMinor: true, differenceMinor: true }).extend({
+  ...balances,
+  account: z.object({ id: z.uuid(), name: z.string() }),
+  closedDifferenceMinor: z.string().nullable(),
+  openStatementLines: z.number(),
+  latestStatementBalance: z.object({ balanceMinor: z.string(), asOf: z.string() }).nullable(),
+  unmatchedLines: z.array(reconciliationLine),
+  matchedLines: z.array(reconciliationLine),
 });
 
 const reportLine = z.object({ ledgerAccountId: z.uuid(), code: z.string(), name: z.string(), nameBn: z.string().nullable(), amountMinor: z.string() });
@@ -87,8 +113,8 @@ addPath("Fiscal periods", { method: "post", path: `${periods}/{periodId}/status`
 addPath("Fiscal periods", { method: "post", path: `${periods}/years/{fiscalYear}/close`, summary: "Year-end close: moves profit to Retained Earnings. Needs period.close and recent MFA", params: yearParams, response: z.object({ fiscalYear: z.number(), netProfitMinor: z.string(), closingEntryNo: z.string().nullable() }) });
 
 addPath("Journals", { method: "post", path: journals, summary: "Post a manual journal. Send Idempotency-Key to make retries safe. Needs ledger.post", params: businessParams, body: journalsValidation.create, response: journal, status: 201, idempotent: true });
-addPath("Journals", { method: "get", path: journals, summary: "List journals with filters. Needs finance.read", params: businessParams, query: journalsValidation.listQuery, response: z.array(journal) });
-addPath("Journals", { method: "get", path: `${journals}/{journalId}`, summary: "Get a journal with its debit and credit lines. Needs finance.read", params: journalParams, response: journal.extend({ lines: z.array(journalLine) }) });
+addPath("Journals", { method: "get", path: journals, summary: "List journals with filters, newest first, with each one's total. Needs finance.read", params: businessParams, query: journalsValidation.listQuery, response: z.array(journalSummary) });
+addPath("Journals", { method: "get", path: `${journals}/{journalId}`, summary: "Get a journal with its debit and credit lines. Needs finance.read", params: journalParams, response: journal.extend({ reversedBy: z.object({ id: z.uuid(), entryNo: z.string() }).nullable(), lines: z.array(journalLine) }) });
 addPath("Journals", { method: "post", path: `${journals}/{journalId}/reverse`, summary: "Reverse a manual journal. Needs ledger.reverse", params: journalParams, body: journalsValidation.reverse, response: journal, status: 201 });
 
 addPath("Reports", { method: "get", path: `${reports}/trial-balance`, summary: "Balance of every account at a date. Needs finance.read", params: businessParams, query: reportsValidation.asOfQuery, response: z.object({ ...reportBasis, asOf: z.string(), items: z.array(reportLine.omit({ amountMinor: true }).extend({ type: z.string(), debitBalanceMinor: z.string(), creditBalanceMinor: z.string() })), totalDebitMinor: z.string(), totalCreditMinor: z.string(), balanced: z.boolean() }) });
@@ -98,8 +124,8 @@ addPath("Reports", { method: "get", path: `${reports}/cash-flow`, summary: "Cash
 
 addPath("Reconciliation", { method: "post", path: reconciliations, summary: "Start reconciling an account against a statement. Needs ledger.post", params: businessParams, body: reconciliationsValidation.create, response: reconciliation, status: 201 });
 addPath("Reconciliation", { method: "get", path: reconciliations, summary: "List reconciliations. Needs finance.read", params: businessParams, query: reconciliationsValidation.listQuery, response: z.array(reconciliation) });
-addPath("Reconciliation", { method: "get", path: `${reconciliations}/{reconciliationId}`, summary: "Current difference and the lines still unmatched. Needs finance.read", params: reconciliationParams });
-addPath("Reconciliation", { method: "post", path: `${reconciliations}/{reconciliationId}/lines`, summary: "Match journal lines to the statement. Needs ledger.post", params: reconciliationParams, body: reconciliationsValidation.matchLines });
+addPath("Reconciliation", { method: "get", path: `${reconciliations}/{reconciliationId}`, summary: "Current difference, the lines still unmatched and those matched so far. Needs finance.read", params: reconciliationParams, response: reconciliationDetail });
+addPath("Reconciliation", { method: "post", path: `${reconciliations}/{reconciliationId}/lines`, summary: "Match journal lines to the statement. Needs ledger.post", params: reconciliationParams, body: reconciliationsValidation.matchLines, response: z.object(balances) });
 addPath("Reconciliation", { method: "delete", path: `${reconciliations}/{reconciliationId}/lines/{journalLineId}`, summary: "Un-match a line. Needs ledger.post", params: reconciliationLineParams });
 addPath("Reconciliation", { method: "post", path: `${reconciliations}/{reconciliationId}/close`, summary: "Close at zero difference, or with adjust: true (needs transactions.approve). Needs ledger.post", params: reconciliationParams, body: reconciliationsValidation.close, response: reconciliation });
 

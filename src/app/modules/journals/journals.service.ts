@@ -203,11 +203,20 @@ const list = async (business: BusinessContext, query: IListJournalsQuery) => {
           : {}),
       },
       orderBy: [{ entryDate: "desc" }, { id: "desc" }],
+      include: { lines: { select: { debitMinor: true } }, reversedBy: { select: { id: true, entryNo: true } } },
       ...pageArgs(query),
     }),
   );
   const page = toPage(rows, query.limit);
-  return { ...page, items: page.items.map(toEntryDto) };
+  // The list shows each entry's size (its debits, which equal its credits) without fetching every line.
+  return {
+    ...page,
+    items: page.items.map(({ lines, ...entry }) => ({
+      ...toEntryDto(entry),
+      totalMinor: lines.reduce((sum, line) => sum + line.debitMinor, 0n),
+      lineCount: lines.length,
+    })),
+  };
 };
 
 const getOne = async (business: BusinessContext, journalId: string) => {

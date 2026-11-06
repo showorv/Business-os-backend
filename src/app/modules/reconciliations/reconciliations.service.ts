@@ -136,6 +136,26 @@ const getOne = (business: BusinessContext, reconciliationId: string) =>
       },
     });
 
+    // Lines already matched here, so they can be un-matched while it's open.
+    const matchedLines = await tx.journalLine.findMany({
+      where: { businessId: business.businessId, reconciliation: { is: { reconciliationId } } },
+      take: UNMATCHED_LINE_LIMIT,
+      orderBy: { id: "asc" },
+      select: {
+        id: true,
+        debitMinor: true,
+        creditMinor: true,
+        memo: true,
+        entry: { select: { entryNo: true, entryDate: true, memo: true } },
+      },
+    });
+    const withEntry = ({ entry, ...line }: (typeof matchedLines)[number]) => ({
+      ...line,
+      entryNo: entry.entryNo,
+      entryDate: fromDbDate(entry.entryDate),
+      entryMemo: entry.memo,
+    });
+
     // Statement lines not yet settled are usually why a reconciliation won't reach zero.
     const openStatementLines = await tx.statementLine.count({
       where: {
@@ -150,19 +170,19 @@ const getOne = (business: BusinessContext, reconciliationId: string) =>
       select: { balanceAfterMinor: true, txnDate: true },
     });
 
+    const { financialAccount, ...rest } = reconciliation;
     return {
-      ...toDto(reconciliation),
+      ...toDto(rest),
+      account: { id: financialAccount.id, name: financialAccount.name },
+      // The live figures below replace the stored ones, so the amount written off at closing is kept here.
+      closedDifferenceMinor: rest.differenceMinor,
       ...balances,
       openStatementLines,
       latestStatementBalance: latestStatementLine
         ? { balanceMinor: latestStatementLine.balanceAfterMinor, asOf: fromDbDate(latestStatementLine.txnDate) }
         : null,
-      unmatchedLines: unmatchedLines.map(({ entry, ...line }) => ({
-        ...line,
-        entryNo: entry.entryNo,
-        entryDate: fromDbDate(entry.entryDate),
-        entryMemo: entry.memo,
-      })),
+      unmatchedLines: unmatchedLines.map(withEntry),
+      matchedLines: matchedLines.map(withEntry),
     };
   });
 
