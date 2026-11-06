@@ -40,7 +40,7 @@ const syncRun = z.object({
   finishedAt: z.string().nullable(),
 });
 
-const template = z.object({ id: z.uuid(), name: z.string(), mapping: z.record(z.string(), z.unknown()) });
+const template = z.object({ id: z.uuid(), name: z.string(), mapping: z.record(z.string(), z.unknown()), createdAt: z.string() });
 
 const statementImport = z.object({
   id: z.uuid(),
@@ -54,11 +54,15 @@ const statementImport = z.object({
   balanceBreaks: z.number(),
   rowErrors: z.array(z.object({ row: z.number(), code: z.string() })),
   errorCode: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  createdAt: z.string(),
 });
 
 const line = z.object({
   id: z.uuid(),
   financialAccountId: z.uuid(),
+  importId: z.uuid().nullable(),
+  connectionId: z.uuid().nullable(),
   txnDate: z.string(),
   direction: z.enum(["IN", "OUT"]),
   amountMinor: z.string(),
@@ -70,6 +74,59 @@ const line = z.object({
   status: z.enum(["UNMATCHED", "AWAITING_POSTING", "MATCHED", "IGNORED"]),
   matchedBy: z.string().nullable(),
   lastMatchError: z.string().nullable(),
+  createdAt: z.string(),
+});
+
+const lineDetail = line.extend({
+  links: z.array(z.object({ transactionId: z.uuid().nullable(), journalLineId: z.uuid().nullable() })),
+  suggestions: z.array(
+    z.object({ journalLineId: z.uuid(), entryNo: z.string(), entryDate: z.string(), memo: z.string().nullable(), referenceNo: z.string().nullable(), transactionId: z.uuid().nullable() }),
+  ),
+});
+
+const mappingFields = z.object({
+  headerRow: z.number().optional(),
+  dateColumn: z.string().optional(),
+  dateFormat: z.string().optional(),
+  descriptionColumn: z.string().optional(),
+  referenceColumn: z.string().optional(),
+  counterpartyColumn: z.string().optional(),
+  amountColumn: z.string().optional(),
+  directionColumn: z.string().optional(),
+  debitColumn: z.string().optional(),
+  creditColumn: z.string().optional(),
+  feeColumn: z.string().optional(),
+  balanceColumn: z.string().optional(),
+});
+
+const previewLine = z.object({
+  txnDate: z.string(),
+  direction: z.enum(["IN", "OUT"]),
+  amountMinor: z.string(),
+  feeMinor: z.string(),
+  balanceAfterMinor: z.string().nullable(),
+  description: z.string().nullable(),
+  reference: z.string().nullable(),
+  counterparty: z.string().nullable(),
+});
+
+const preview = z.object({
+  headers: z.array(z.string()),
+  suggestion: mappingFields,
+  dateFormats: z.array(z.string()),
+  fileName: z.string(),
+  currency: z.string(),
+  rawRows: z.array(z.array(z.string())),
+  result: z
+    .object({
+      totalRows: z.number(),
+      readableRows: z.number(),
+      failedRows: z.number(),
+      balanceBreaks: z.number(),
+      errors: z.array(z.object({ row: z.number(), code: z.string() })),
+      lines: z.array(previewLine),
+    })
+    .optional(),
 });
 
 const rule = z.object({
@@ -105,7 +162,7 @@ addPath("Statement templates", { method: "get", path: templates, summary: "List 
 addPath("Statement templates", { method: "patch", path: `${templates}/{templateId}`, summary: "Change a saved mapping. Needs finance.write", params: templateParams, body: statementTemplatesValidation.update, response: template });
 addPath("Statement templates", { method: "delete", path: `${templates}/{templateId}`, summary: "Remove a saved mapping. Past imports aren't affected. Needs finance.write", params: templateParams });
 
-addPath("Statement imports", { method: "post", path: `${imports}/preview`, summary: "See a file's columns, a suggested mapping, and what would be imported. Changes nothing. Needs finance.write", params: businessParams, body: statementImportsValidation.preview });
+addPath("Statement imports", { method: "post", path: `${imports}/preview`, summary: "See a file's columns, a suggested mapping, and what would be imported. Changes nothing. Needs finance.write", params: businessParams, body: statementImportsValidation.preview, response: preview });
 addPath("Statement imports", { method: "post", path: imports, summary: "Import an uploaded statement, through the worker. Needs finance.write", params: businessParams, body: statementImportsValidation.create, response: statementImport, status: 202 });
 addPath("Statement imports", { method: "get", path: imports, summary: "List imports. Needs finance.read", params: businessParams, query: statementImportsValidation.listQuery, response: page(statementImport) });
 addPath("Statement imports", { method: "get", path: `${imports}/{importId}`, summary: "An import's status, counts and row errors. Needs finance.read", params: importParams, response: statementImport });
@@ -113,7 +170,7 @@ addPath("Statement imports", { method: "get", path: `${imports}/{importId}`, sum
 addPath("Statement lines", { method: "get", path: lines, summary: "The review inbox: use status=UNMATCHED. Needs finance.read", params: businessParams, query: statementLinesValidation.listQuery, response: page(line) });
 addPath("Statement lines", { method: "get", path: `${lines}/summary`, summary: "How many lines are in each status. Needs finance.read", params: businessParams, query: statementLinesValidation.summaryQuery, response: z.object({ unmatched: z.number(), awaitingPosting: z.number(), matched: z.number(), ignored: z.number() }) });
 addPath("Statement lines", { method: "post", path: `${lines}/run-matcher`, summary: "Try matching open lines again. Needs finance.write", params: businessParams, body: statementLinesValidation.runMatcher, response: z.object({ matched: z.number(), ruled: z.number(), needsReview: z.number() }) });
-addPath("Statement lines", { method: "get", path: `${lines}/{lineId}`, summary: "One line, what it's linked to, and journal lines it might match. Needs finance.read", params: lineParams, response: line });
+addPath("Statement lines", { method: "get", path: `${lines}/{lineId}`, summary: "One line, what it's linked to, and journal lines it might match. Needs finance.read", params: lineParams, response: lineDetail });
 addPath("Statement lines", { method: "post", path: `${lines}/{lineId}/match`, summary: "Match to existing journal lines, which must add up to it. Needs finance.write", params: lineParams, body: statementLinesValidation.match, response: line });
 addPath("Statement lines", { method: "post", path: `${lines}/{lineId}/unmatch`, summary: "Remove the link. Any transaction stays. Needs finance.write", params: lineParams, response: line });
 addPath("Statement lines", { method: "post", path: `${lines}/{lineId}/categorize`, summary: "Create a transaction or transfer from it. Needs finance.write, and ledger.post for postNow", params: lineParams, body: statementLinesValidation.categorize, response: line.extend({ transactionId: z.uuid() }) });
