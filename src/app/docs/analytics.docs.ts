@@ -44,13 +44,17 @@ const budgetSummary = z.object({ id: z.uuid(), name: z.string(), startMonth: z.s
 
 const budgetLine = z.object({
   id: z.uuid(),
+  category: z.object({ id: z.uuid(), name: z.string(), nameBn: z.string().nullable(), type: z.string() }),
   amountMinor: z.string(),
   alertPercent: z.number(),
   actualMinor: z.string(),
   remainingMinor: z.string(),
   usedPercent: z.string().nullable(),
   level: z.enum(["OK", "NEAR", "REACHED", "OVER"]),
+  alerts: z.array(z.object({ percent: z.number(), actualMinor: z.string(), createdAt: z.string() })),
 });
+
+const comparePeriod = z.object({ fromMonth: z.string(), toMonth: z.string(), amountMinor: z.string() });
 
 const goal = z.object({
   id: z.uuid(),
@@ -96,11 +100,11 @@ const goals = "/businesses/{businessId}/goals";
 const exportsPath = "/businesses/{businessId}/report-exports";
 
 addPath("Analytics", { method: "get", path: `${analytics}/dashboard`, summary: "Revenue, expenses, profit, cash, trend and top expenses. Fiscal year to date by default. Needs finance.read", params: businessParams, query: analyticsValidation.dashboardQuery, response: dashboard });
-addPath("Analytics", { method: "get", path: `${analytics}/compare`, summary: "Compare a metric between two month ranges. Needs finance.read", params: businessParams, query: analyticsValidation.compareQuery });
+addPath("Analytics", { method: "get", path: `${analytics}/compare`, summary: "Compare a metric between two month ranges. Needs finance.read", params: businessParams, query: analyticsValidation.compareQuery, response: z.object({ currency: z.string(), basis: z.literal("POSTED_ACTUALS"), metric: z.string(), current: comparePeriod, comparedTo: comparePeriod, changeMinor: z.string(), changePercent: z.string().nullable() }) });
 
 addPath("Budgets", { method: "post", path: budgets, summary: "Create a budget. Needs finance.write", params: businessParams, body: budgetsValidation.create, response: budgetSummary, status: 201 });
 addPath("Budgets", { method: "get", path: budgets, summary: "List budgets. Needs finance.read", params: businessParams, query: budgetsValidation.listQuery, response: z.array(budgetSummary) });
-addPath("Budgets", { method: "get", path: `${budgets}/{budgetId}`, summary: "A budget against actuals from the ledger, with alerts. Needs finance.read", params: budgetParams, response: budgetSummary.extend({ currency: z.string(), lines: z.array(budgetLine) }) });
+addPath("Budgets", { method: "get", path: `${budgets}/{budgetId}`, summary: "A budget against actuals from the ledger, with alerts. Needs finance.read", params: budgetParams, response: budgetSummary.extend({ currency: z.string(), basis: z.literal("POSTED_ACTUALS"), lines: z.array(budgetLine) }) });
 addPath("Budgets", { method: "patch", path: `${budgets}/{budgetId}`, summary: "Rename or archive. Needs finance.write", params: budgetParams, body: budgetsValidation.update, response: budgetSummary });
 addPath("Budgets", { method: "post", path: `${budgets}/{budgetId}/lines`, summary: "Add a line, or change a category's existing line. Needs finance.write", params: budgetParams, body: budgetsValidation.line });
 
