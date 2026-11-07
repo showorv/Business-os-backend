@@ -7,6 +7,7 @@ import { ingestionService } from "../ai/ingestion.js";
 import { Permission } from "../constants/permissions.js";
 import { EventType } from "../utils/outbox.js";
 import { auditService } from "../modules/audit/audit.service.js";
+import { billingService } from "../modules/billing/billing.service.js";
 import { membersService } from "../modules/members/members.service.js";
 import { NotificationType } from "../modules/notifications/notifications.interface.js";
 import { notificationsService } from "../modules/notifications/notifications.service.js";
@@ -173,6 +174,8 @@ const MAINTENANCE_JOBS: Record<string, { pattern: string; run: () => Promise<unk
   "ledger.verify": { pattern: "0 2 * * *", run: checkLedgers },
   "audit.verify": { pattern: "30 2 * * *", run: checkAuditChains },
   "system.clean-up": { pattern: "0 3 * * *", run: cleanUp },
+  // Mid-morning, when people read email: plans ending soon, and plans that just ended.
+  "billing.plan-reminders": { pattern: "0 10 * * *", run: () => billingService.sendPlanReminders() },
 };
 
 // Safe to repeat on every start: it updates each timer rather than adding another.

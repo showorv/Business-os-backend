@@ -1,5 +1,7 @@
 import type { RequestHandler } from "express";
+import { getRequestContext } from "../../utils/requestContext.js";
 import { sendResponse } from "../../utils/sendResponse.js";
+import type { ICheckoutBody, IDemoOutcomeBody, IPaymentParams } from "./billing.interface.js";
 import { billingService } from "./billing.service.js";
 
 const plans: RequestHandler = async (_req, res) => {
@@ -10,4 +12,22 @@ const mine: RequestHandler = async (req, res) => {
   sendResponse(res, 200, await billingService.mine(req.auth!));
 };
 
-export const billingController = { plans, mine };
+const checkout: RequestHandler = async (req, res) => {
+  sendResponse(res, 201, await billingService.checkout(req.auth!, req.body as ICheckoutBody, getRequestContext(req)));
+};
+
+const listPayments: RequestHandler = async (req, res) => {
+  sendResponse(res, 200, await billingService.listPayments(req.auth!));
+};
+
+const getPayment: RequestHandler = async (req, res) => {
+  const { paymentId } = req.params as IPaymentParams;
+  sendResponse(res, 200, await billingService.getPayment(req.auth!, paymentId));
+};
+
+const completeDemo: RequestHandler = async (req, res) => {
+  const { paymentId } = req.params as IPaymentParams;
+  sendResponse(res, 200, await billingService.completeDemo(req.auth!, paymentId, req.body as IDemoOutcomeBody, getRequestContext(req)));
+};
+
+export const billingController = { plans, mine, checkout, listPayments, getPayment, completeDemo };

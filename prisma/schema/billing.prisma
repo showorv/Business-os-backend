@@ -20,6 +20,7 @@ model Plan {
   updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   subscriptions WorkspaceSubscription[]
+  payments      Payment[]
 
   @@map("plans")
 }
@@ -56,4 +57,46 @@ model WorkspaceSubscription {
 
   @@index([endsAt])
   @@map("workspace_subscriptions")
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  FAILED
+  CANCELLED
+}
+
+// One attempt to pay for a plan. It starts PENDING when the person leaves for the payment page, and the
+// gateway's answer moves it on. The price is copied from the plan at that moment, never taken from the
+// browser. A paid one gets a receipt number and the period it paid for.
+model Payment {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  workspaceId   String        @map("workspace_id") @db.Uuid
+  planKey       String        @map("plan_key") @db.VarChar(40)
+  billingCycle  BillingCycle  @map("billing_cycle")
+  amountMinor   BigInt        @map("amount_minor")
+  currency      String        @db.Char(3)
+  status        PaymentStatus @default(PENDING)
+  // "demo" for now; "sslcommerz" and "bkash" once the merchant accounts exist.
+  gateway       String        @db.VarChar(20)
+  // The gateway's own transaction id, and how the person paid (bkash, nagad, card).
+  gatewayRef    String?       @map("gateway_ref") @db.VarChar(120)
+  method        String?       @db.VarChar(20)
+  receiptNumber String?       @unique @map("receipt_number") @db.VarChar(30)
+  periodStart   DateTime?     @map("period_start") @db.Timestamptz(3)
+  periodEnd     DateTime?     @map("period_end") @db.Timestamptz(3)
+  failureReason String?       @map("failure_reason")
+  createdBy     String        @map("created_by") @db.Uuid
+  // A checkout left open longer than this can no longer be paid; a new one is started instead.
+  expiresAt     DateTime      @map("expires_at") @db.Timestamptz(3)
+  paidAt        DateTime?     @map("paid_at") @db.Timestamptz(3)
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planKey], references: [key])
+  creator   User      @relation("PaymentCreator", fields: [createdBy], references: [id])
+
+  @@index([workspaceId, createdAt])
+  @@map("payments")
 }

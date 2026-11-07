@@ -70,6 +70,15 @@ const envSchema = z
     CLAMAV_HOST: optionalString,
     CLAMAV_PORT: z.coerce.number().int().positive().default(3310),
 
+    // Who takes payments for plans. "demo" is a pretend payment page for testing: no money moves.
+    // SSLCommerz and bKash are added once the merchant accounts exist.
+    PAYMENT_GATEWAY: z.enum(["demo"]).default("demo"),
+    // The demo page would let anyone get Pro free, so production refuses it unless this is "true".
+    PAYMENT_DEMO_IN_PRODUCTION: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((value) => value === "true"),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })

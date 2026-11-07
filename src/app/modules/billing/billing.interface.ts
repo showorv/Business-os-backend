@@ -17,3 +17,14 @@ export interface Entitlements {
 export type PlanLimit = "businesses" | "members" | "storage";
 
 export type IPlansQuery = z.infer<typeof billingValidation.plansQuery>;
+export type ICheckoutBody = z.infer<typeof billingValidation.checkout>;
+export type IPaymentParams = z.infer<typeof billingValidation.paymentParams>;
+export type IDemoOutcomeBody = z.infer<typeof billingValidation.demoOutcome>;
+
+// What the gateway reported. Details are kept on the payment for the receipt and for support.
+export interface PaymentOutcome {
+  status: "PAID" | "FAILED" | "CANCELLED";
+  gatewayRef?: string;
+  method?: string;
+  reason?: string;
+}

@@ -10,6 +10,7 @@ model Workspace {
 
   owner         User?                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
   subscription  WorkspaceSubscription?
+  payments      Payment[]
   users         UserWorkspace[]
   businesses    Business[]
   roles         Role[]

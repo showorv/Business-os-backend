@@ -36,6 +36,9 @@ const CHANNELS_BY_TYPE: Partial<Record<NotificationType, NotificationChannel[]>>
   [NotificationType.EXPORT_FAILED]: ["IN_APP"],
   [NotificationType.STATEMENT_IMPORT_FINISHED]: ["IN_APP"],
   [NotificationType.INVITATION]: ["EMAIL"],
+  [NotificationType.PAYMENT_RECEIVED]: ["IN_APP", "EMAIL"],
+  [NotificationType.PLAN_ENDING]: ["IN_APP", "EMAIL"],
+  [NotificationType.PLAN_ENDED]: ["IN_APP", "EMAIL"],
   [NotificationType.PASSWORD_RESET]: ["EMAIL"],
   [NotificationType.PASSWORD_CHANGED]: ["EMAIL"],
   [NotificationType.ACCOUNT_LOCKED]: ["EMAIL"],
@@ -52,6 +55,10 @@ const ALWAYS_SENT = new Set<string>([
   NotificationType.SESSION_REUSE_DETECTED,
   NotificationType.LEDGER_CHECK_FAILED,
   NotificationType.AUDIT_CHECK_FAILED,
+  // A receipt, and warnings that the plan is about to stop, are part of paying, not optional news.
+  NotificationType.PAYMENT_RECEIVED,
+  NotificationType.PLAN_ENDING,
+  NotificationType.PLAN_ENDED,
 ]);
 
 const minutesOf = (time: string) => {

@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 and 11.2 done) |
 
 ## Run it
 
@@ -230,8 +230,8 @@ requireAuth              who are you?
 | Step | What it covers | Status |
 |---|---|---|
 | 11.1 | Plans and limits: trial, enforcement, Plan page, upgrade prompts | ✅ Done |
-| 11.2 | Payments through a demo gateway (success, fail, cancel), receipts, reminders, grace; SSLCommerz and bKash plug in later | ⬜ Next |
-| 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ⬜ |
+| 11.2 | Payments through a demo gateway (success, fail, cancel), receipts, reminders, grace; SSLCommerz and bKash plug in later | ✅ Done |
+| 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ⬜ Next |
 | 11.4 | Customers and suppliers | ⬜ |
 | 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ⬜ |
 | 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ |
@@ -277,6 +277,53 @@ requireAuth              who are you?
 - **every workspace that already exists gets Pro free with no end date** ("Existing account before plans"), so nobody who used the app before loses anything. You can change that from the admin panel in 11.3.
 
 **How it was checked.** 8 new tests (`tests/billing.test.ts`): public plans; the trial on sign-up; an invited person sees their own plan; a trial ending (third business refused, the newer business locked, archive allowed, restore refused, a grant unlocks it); the 7-day grace; people counted once; storage; AI refused on Free. All 744 tests pass.
+
+### Step 11.2: Paying for a plan (demo gateway)
+
+You don't have an SSLCommerz or bKash merchant account yet, so payments go through a **demo gateway**: a pretend payment page in the web app where you choose what the gateway answers (paid, failed or cancelled). **No money moves.** Everything else is real: the payment record, the receipt, the plan change, the emails. When a merchant account is ready, only the gateway adapter (`src/lib/payments.ts`) and one callback route are added.
+
+**How one payment goes.**
+1. The account's owner presses *Upgrade* on the Plan page. `POST /billing/checkout {planKey, billingCycle}` saves a payment as `PENDING`, with the price **taken from the plan on the server** (whatever the browser sends is ignored), and returns where to pay.
+2. The person pays on the gateway's page (for now, the demo page). The checkout lasts 30 minutes.
+3. The gateway's answer settles the payment, once. If it's paid:
+   - the plan runs for one more month or year;
+   - days already covered on the same plan are kept: paying during the trial starts the paid year when the trial ends, and paying early adds the year after the current one;
+   - after a plan has ended, the new period starts now, and any read-only businesses work again;
+   - the payment gets a receipt number (`BOS-2026-000001`) and the period it paid for;
+   - the owner gets a receipt email and an in-app notification.
+4. Failed or cancelled: the plan stays as it was, and the attempt shows in the payment history.
+
+Receiving the same answer twice changes nothing (gateways do resend). A different answer for a finished payment is refused (`PAYMENT_NOT_PENDING`). A checkout older than 30 minutes can't be paid (`PAYMENT_EXPIRED`).
+
+**Reminder emails** (a new daily job at 10:00 Bangladesh time, `billing.plan-reminders`):
+- a trial ending: 3 days and 1 day before;
+- a paid plan, or Pro given free until a date, ending: 7 days and 1 day before;
+- a paid plan in its 7 grace days, and any plan that has moved to Free.
+
+Each one goes once per end date, so renewing brings fresh reminders and nothing is sent twice. They always send, like password emails, because they're about the account.
+
+**New endpoints.**
+- `POST /billing/checkout`: start paying (owner only).
+- `GET /billing/payments`: the payment history (unfinished checkouts left out).
+- `GET /billing/payments/:id`: one payment, with what the receipt needs.
+- `POST /billing/payments/:id/demo`: the demo page's answer. It only works while the demo gateway is on.
+
+**Safety.** The demo gateway would give Pro away free, so with `NODE_ENV=production` it is **switched off** unless `PAYMENT_DEMO_IN_PRODUCTION=true`. Only the account's owner can pay (`BILLING_OWNER_ONLY`). Someone else's payment answers `404`. Every checkout, payment, failure and cancellation is written to the audit log.
+
+**Database change** (migration `20261108090000_payments`): a new `payments` table and a receipt number counter. Run `npm run db:deploy` on Neon.
+
+**New settings in `.env`** (see `.env.example`): `PAYMENT_GATEWAY=demo` and `PAYMENT_DEMO_IN_PRODUCTION=false`. Neither is a secret.
+
+**How it was checked.** 7 new tests (`tests/payments.test.ts`):
+- paying during the trial (the year starts after it, the receipt, the email; a repeat answer changes nothing, and a different one is refused);
+- a failed and a cancelled payment, both in the history;
+- paying after a lapse unlocks businesses;
+- what can't be bought, other people's payments, a lifetime gift, and someone who isn't the owner;
+- an expired checkout;
+- reminders sent once, then again at 1 day;
+- month arithmetic (31 January plus one month is the end of February).
+
+All 751 tests pass.
 
 ## What was built in Phase 8
 
@@ -1422,7 +1469,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration; after it, every existing account is on Pro free with no end date.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) and the payments migration (11.2, still to run).
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
 4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.

@@ -139,6 +139,56 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
     path: `/invitations/accept?token=${encodeURIComponent(f.text("token"))}`,
     global: true,
   }),
+  "billing.payment_received": (f) => ({
+    en: {
+      subject: `Payment received: ${f.text("planName")}`,
+      body: `Thank you. We received ${f.money("amount")} for ${f.text("planName")}. It's paid until ${f.date("periodEnd")}. Receipt ${f.text("receiptNumber")}.`,
+    },
+    bn: {
+      subject: `পেমেন্ট পেয়েছি: ${f.text("planName")}`,
+      body: `ধন্যবাদ। ${f.text("planName")}-এর জন্য ${f.money("amount")} পেয়েছি। ${f.date("periodEnd")} পর্যন্ত পরিশোধিত। রসিদ ${f.text("receiptNumber")}।`,
+    },
+    path: `/settings/plan/receipts/${f.text("paymentId")}`,
+    global: true,
+  }),
+  "billing.plan_ending": (f) => {
+    const stage = f.text("stage");
+    const en =
+      stage === "trial"
+        ? `Your ${f.text("planName")} trial ends in ${f.count("days")} day(s), on ${f.date("endsOn")}. Choose a plan to keep everything it gives you; otherwise you move to Free and nothing is deleted.`
+        : stage === "granted"
+          ? `The free ${f.text("planName")} you were given ends in ${f.count("days")} day(s), on ${f.date("endsOn")}. Pay to keep it; otherwise you move to Free and nothing is deleted.`
+          : `Your ${f.text("planName")} plan is paid until ${f.date("endsOn")}, ${f.count("days")} day(s) from now. Renew to keep it running.`;
+    const bn =
+      stage === "trial"
+        ? `আপনার ${f.text("planName")} ট্রায়াল ${f.count("days")} দিনে, ${f.date("endsOn")} তারিখে শেষ হবে। সব সুবিধা রাখতে একটি প্ল্যান বেছে নিন; না হলে ফ্রি প্ল্যানে যাবেন, কিছুই মোছা হবে না।`
+        : stage === "granted"
+          ? `আপনাকে দেওয়া বিনামূল্যের ${f.text("planName")} ${f.count("days")} দিনে, ${f.date("endsOn")} তারিখে শেষ হবে। রাখতে চাইলে পরিশোধ করুন; না হলে ফ্রি প্ল্যানে যাবেন, কিছুই মোছা হবে না।`
+          : `আপনার ${f.text("planName")} প্ল্যান ${f.date("endsOn")} পর্যন্ত পরিশোধিত, আর ${f.count("days")} দিন বাকি। চালু রাখতে নবায়ন করুন।`;
+    return {
+      en: { subject: stage === "trial" ? "Your trial is ending soon" : "Your plan is ending soon", body: en },
+      bn: { subject: stage === "trial" ? "আপনার ট্রায়াল শীঘ্রই শেষ হচ্ছে" : "আপনার প্ল্যান শীঘ্রই শেষ হচ্ছে", body: bn },
+      path: "/settings/plan",
+      global: true,
+    };
+  },
+  "billing.plan_ended": (f) => {
+    const stage = f.text("stage");
+    const en =
+      stage === "grace"
+        ? `Your ${f.text("planName")} plan has ended. Everything keeps working until ${f.date("until")}; renew before then to keep it.`
+        : `Your ${f.text("planName")} ${stage === "trial" ? "trial" : "plan"} has ended, so you're on Free now. Nothing was deleted, and you can upgrade any time.`;
+    const bn =
+      stage === "grace"
+        ? `আপনার ${f.text("planName")} প্ল্যান শেষ হয়েছে। ${f.date("until")} পর্যন্ত সব চলবে; রাখতে চাইলে এর আগে নবায়ন করুন।`
+        : `আপনার ${f.text("planName")} ${stage === "trial" ? "ট্রায়াল" : "প্ল্যান"} শেষ, এখন আপনি ফ্রি প্ল্যানে। কিছুই মোছা হয়নি, যেকোনো সময় আপগ্রেড করতে পারেন।`;
+    return {
+      en: { subject: stage === "trial" ? "Your trial has ended" : "Your plan has ended", body: en },
+      bn: { subject: stage === "trial" ? "আপনার ট্রায়াল শেষ" : "আপনার প্ল্যান শেষ", body: bn },
+      path: "/settings/plan",
+      global: true,
+    };
+  },
   "auth.password_reset": (f) => ({
     en: { subject: "Reset your password", body: "Use this link to choose a new password. It lasts one hour. If you didn't ask for this, you can ignore this email." },
     bn: { subject: "পাসওয়ার্ড রিসেট করুন", body: "নতুন পাসওয়ার্ড বেছে নিতে এই লিংক ব্যবহার করুন। এটি এক ঘণ্টা কাজ করবে। আপনি না চাইলে এই ইমেইল উপেক্ষা করুন।" },

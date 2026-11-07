@@ -117,6 +117,18 @@ export const ErrorCode = {
   PLAN_FEATURE_REQUIRED: "PLAN_FEATURE_REQUIRED",
   // A business beyond the plan's limit after it lapsed: readable, but nothing in it can change.
   PLAN_BUSINESS_LOCKED: "PLAN_BUSINESS_LOCKED",
+  // Only the person who owns the account can buy or change its plan.
+  BILLING_OWNER_ONLY: "BILLING_OWNER_ONLY",
+  // A free or hidden plan, which can't be bought.
+  PLAN_NOT_FOR_SALE: "PLAN_NOT_FOR_SALE",
+  // The account already has the plan free with no end date, so there's nothing to pay for.
+  BILLING_NOT_NEEDED: "BILLING_NOT_NEEDED",
+  // The payment was already paid, failed or cancelled.
+  PAYMENT_NOT_PENDING: "PAYMENT_NOT_PENDING",
+  // The checkout was left open too long; start a new one.
+  PAYMENT_EXPIRED: "PAYMENT_EXPIRED",
+  // The demo payment page is switched off (in production, or another gateway is in use).
+  PAYMENT_GATEWAY_UNAVAILABLE: "PAYMENT_GATEWAY_UNAVAILABLE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];
