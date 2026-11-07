@@ -292,6 +292,7 @@ const sendDelivery = async (deliveryId: string) => {
     digitStyle: (notification.user?.digitStyle ?? "latin") as "latin" | "bangla",
     grouping: (business?.settings as { numberGrouping?: "lakh" | "western" } | undefined)?.numberGrouping ?? "lakh",
     businessName: business?.name ?? null,
+    businessId: notification.businessId,
   });
 
   try {

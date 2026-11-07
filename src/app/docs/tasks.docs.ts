@@ -24,7 +24,12 @@ const task = z.object({
   dueAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   isOverdue: z.boolean(),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
 });
+
+const taskDetail = task.extend({ attachments: z.array(z.object({ documentId: z.uuid(), createdAt: z.string() })) });
 
 const comment = z.object({ id: z.uuid(), authorId: z.uuid(), body: z.string(), createdAt: z.string() });
 
@@ -43,6 +48,8 @@ const reminder = z.object({
   sourceType: z.enum(["MANUAL", "TASK", "RECURRING_SCHEDULE"]),
   sourceId: z.uuid().nullable(),
   status: z.enum(["ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"]),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
 });
 
 const schedule = z.object({
@@ -63,6 +70,8 @@ const schedule = z.object({
   autoPost: z.boolean(),
   remindDaysBefore: z.number().nullable(),
   status: z.enum(["ACTIVE", "PAUSED", "ENDED"]),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
 });
 
 const run = z.object({
@@ -71,6 +80,7 @@ const run = z.object({
   status: z.enum(["CREATED", "FAILED"]),
   transactionId: z.uuid().nullable(),
   errorCode: z.string().nullable(),
+  createdAt: z.string(),
 });
 
 const notification = z.object({
@@ -119,7 +129,7 @@ addPath("Tasks", { method: "post", path: tasks, summary: "Create a task. A due d
 addPath("Tasks", { method: "get", path: tasks, summary: "List tasks: all, mine=true or overdue=true. Needs tasks.read", params: businessParams, query: tasksValidation.listQuery, response: page(task) });
 addPath("Tasks", { method: "get", path: `${tasks}/summary`, summary: "How many tasks are in each status, overdue, and assigned to you. Needs tasks.read", params: businessParams, response: z.object({ todo: z.number(), inProgress: z.number(), blocked: z.number(), done: z.number(), cancelled: z.number(), overdue: z.number(), assignedToMe: z.number() }) });
 addPath("Tasks", { method: "get", path: `${tasks}/calendar`, summary: "Tasks and reminders by day, for up to 62 days. Needs tasks.read", params: businessParams, query: tasksValidation.calendarQuery, response: z.array(calendarItem) });
-addPath("Tasks", { method: "get", path: `${tasks}/{taskId}`, summary: "One task with its attachments. Needs tasks.read", params: taskParams, response: task });
+addPath("Tasks", { method: "get", path: `${tasks}/{taskId}`, summary: "One task with its attachments. Needs tasks.read", params: taskParams, response: taskDetail });
 addPath("Tasks", { method: "patch", path: `${tasks}/{taskId}`, summary: "Change a task or move its status. Needs tasks.write", params: taskParams, body: tasksValidation.update, response: task });
 addPath("Tasks", { method: "get", path: `${tasks}/{taskId}/comments`, summary: "A task's comments, oldest first. Needs tasks.read", params: taskParams, response: z.array(comment) });
 addPath("Tasks", { method: "post", path: `${tasks}/{taskId}/comments`, summary: "Add a comment. Tells the assignee and creator. Needs tasks.write", params: taskParams, body: tasksValidation.comment, response: comment, status: 201 });

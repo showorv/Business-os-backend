@@ -12,6 +12,7 @@ export interface RenderOptions {
   digitStyle: "latin" | "bangla";
   grouping: "lakh" | "western";
   businessName: string | null;
+  businessId: string | null;
 }
 
 interface Words {
@@ -22,8 +23,10 @@ interface Words {
 interface Template {
   en: Words;
   bn: Words;
-  // Where the button goes in the web app.
+  // Where the button goes in the web app, inside the business's pages (/b/{businessId}).
   path?: string;
+  // The path is a whole-app page, not inside one business.
+  global?: true;
 }
 
 // Turns stored values into text in the reader's language and digits.
@@ -48,22 +51,22 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
   "task.assigned": (f) => ({
     en: { subject: `New task: ${f.text("title")}`, body: `You have been assigned "${f.text("title")}".` },
     bn: { subject: `নতুন কাজ: ${f.text("title")}`, body: `আপনাকে "${f.text("title")}" কাজটি দেওয়া হয়েছে।` },
-    path: `/tasks/${f.text("taskId")}`,
+    path: `/tasks?task=${f.text("taskId")}`,
   }),
   "task.commented": (f) => ({
     en: { subject: `New comment on: ${f.text("title")}`, body: `${f.text("authorName")} commented on "${f.text("title")}".` },
     bn: { subject: `নতুন মন্তব্য: ${f.text("title")}`, body: `${f.text("authorName")} "${f.text("title")}" কাজে মন্তব্য করেছেন।` },
-    path: `/tasks/${f.text("taskId")}`,
+    path: `/tasks?task=${f.text("taskId")}`,
   }),
   "task.overdue": (f) => ({
     en: { subject: `Overdue: ${f.text("title")}`, body: `"${f.text("title")}" was due on ${f.moment("dueAt")}.` },
     bn: { subject: `সময় পেরিয়ে গেছে: ${f.text("title")}`, body: `"${f.text("title")}" কাজের শেষ সময় ছিল ${f.moment("dueAt")}।` },
-    path: `/tasks/${f.text("taskId")}`,
+    path: `/tasks?task=${f.text("taskId")}`,
   }),
   "reminder.due": (f) => ({
     en: { subject: `Reminder: ${f.text("title")}`, body: `"${f.text("title")}" is due on ${f.moment("occurrenceAt")}.` },
     bn: { subject: `অনুস্মারক: ${f.text("title")}`, body: `"${f.text("title")}" এর সময়: ${f.moment("occurrenceAt")}।` },
-    path: "/reminders",
+    path: "/tasks?tab=reminders",
   }),
   "transaction.pending_approval": (f) => ({
     en: { subject: `Approval needed: ${f.text("number")}`, body: `Transaction ${f.text("number")} for ${f.money("amountMinor")} is waiting for your approval.` },
@@ -84,7 +87,7 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
   "goal.achieved": (f) => ({
     en: { subject: `Goal achieved: ${f.text("goalName")}`, body: `You reached your goal "${f.text("goalName")}".` },
     bn: { subject: `লক্ষ্য পূরণ হয়েছে: ${f.text("goalName")}`, body: `আপনি "${f.text("goalName")}" লক্ষ্য পূরণ করেছেন।` },
-    path: `/goals/${f.text("goalId")}`,
+    path: "/goals",
   }),
   "export.ready": (f) => ({
     en: { subject: "Your report is ready", body: `Your ${f.text("format")} export is ready to download.` },
@@ -105,7 +108,7 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
       subject: `নিয়মিত লেনদেন ব্যর্থ: ${f.text("scheduleName")}`,
       body: `${f.date("occurrenceDate")} তারিখে "${f.text("scheduleName")}" চালানো যায়নি (${f.text("errorCode")})। ওই তারিখের জন্য কিছু লেখা হয়নি।`,
     },
-    path: `/recurring/${f.text("scheduleId")}`,
+    path: `/recurring?schedule=${f.text("scheduleId")}`,
   }),
   "ledger.check_failed": () => ({
     en: { subject: "Your books need checking", body: "The nightly check found figures that don't match the ledger. Please look into this before relying on your reports." },
@@ -118,27 +121,29 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
   "statement_import.finished": (f) => ({
     en: { subject: "Your statement was imported", body: `${f.count("newLines")} new lines were added, and ${f.count("needsReview")} need your review.` },
     bn: { subject: "আপনার স্টেটমেন্ট ইমপোর্ট হয়েছে", body: `${f.count("newLines")}টি নতুন লাইন যোগ হয়েছে, এবং ${f.count("needsReview")}টি আপনার দেখা দরকার।` },
-    path: "/statement-lines",
+    path: "/statements",
   }),
   "integration.needs_reauth": (f) => ({
     en: { subject: `Reconnect ${f.text("provider")}`, body: `${f.text("provider")} stopped accepting our sign-in, so syncing has paused. Please enter its credentials again.` },
     bn: { subject: `${f.text("provider")} আবার সংযুক্ত করুন`, body: `${f.text("provider")} আমাদের সাইন ইন নিচ্ছে না, তাই সিঙ্ক বন্ধ আছে। দয়া করে আবার তথ্য দিন।` },
-    path: "/integrations",
+    path: "/statements",
   }),
   "integration.sync_failing": (f) => ({
     en: { subject: `${f.text("provider")} keeps failing to sync`, body: `${f.count("failures")} syncs in a row have failed. Statement lines may be out of date.` },
     bn: { subject: `${f.text("provider")} সিঙ্ক বারবার ব্যর্থ`, body: `পরপর ${f.count("failures")}টি সিঙ্ক ব্যর্থ হয়েছে। স্টেটমেন্টের তথ্য পুরনো হতে পারে।` },
-    path: "/integrations",
+    path: "/statements",
   }),
   invitation: (f) => ({
     en: { subject: `You're invited to ${f.text("businessName")}`, body: `${f.text("inviterName")} invited you to join ${f.text("businessName")}. This link lasts 7 days.` },
     bn: { subject: `${f.text("businessName")} এ আমন্ত্রণ`, body: `${f.text("inviterName")} আপনাকে ${f.text("businessName")} এ যোগ দিতে আমন্ত্রণ জানিয়েছেন। এই লিংক ৭ দিন কাজ করবে।` },
     path: `/invitations/accept?token=${encodeURIComponent(f.text("token"))}`,
+    global: true,
   }),
   "auth.password_reset": (f) => ({
     en: { subject: "Reset your password", body: "Use this link to choose a new password. It lasts one hour. If you didn't ask for this, you can ignore this email." },
     bn: { subject: "পাসওয়ার্ড রিসেট করুন", body: "নতুন পাসওয়ার্ড বেছে নিতে এই লিংক ব্যবহার করুন। এটি এক ঘণ্টা কাজ করবে। আপনি না চাইলে এই ইমেইল উপেক্ষা করুন।" },
     path: `/reset-password?token=${encodeURIComponent(f.text("token"))}`,
+    global: true,
   }),
   "auth.password_changed": () => ({
     en: { subject: "Your password was changed", body: "Your password was just changed and you were signed out everywhere. If this wasn't you, reset your password now." },
@@ -164,7 +169,9 @@ const escapeHtml = (value: string) =>
 export const renderNotification = (type: NotificationType, params: NotificationParams, options: RenderOptions) => {
   const template = TEMPLATES[type](formattersFor(params, options));
   const words = options.locale === "bn-BD" ? template.bn : template.en;
-  const url = template.path ? `${env.APP_URL}${template.path}` : null;
+  // Business pages live under /b/{businessId} in the web app; without a business there's nowhere to send them.
+  const path = template.path && (template.global ? template.path : options.businessId ? `/b/${options.businessId}${template.path}` : null);
+  const url = path ? `${env.APP_URL}${path}` : null;
   const business = options.businessName ? `${BUSINESS_LABEL[options.locale]}: ${options.businessName}` : null;
 
   const text = [words.body, business, url].filter(Boolean).join("\n\n");

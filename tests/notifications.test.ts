@@ -179,7 +179,7 @@ describe("email", () => {
     const { html, text } = renderNotification(
       NotificationType.TASK_ASSIGNED,
       { taskId: "1", title: `<script>alert(1)</script>"><img src=x>` },
-      { locale: "en", digitStyle: "latin", grouping: "lakh", businessName: "<b>Shop</b>" },
+      { locale: "en", digitStyle: "latin", grouping: "lakh", businessName: "<b>Shop</b>", businessId: null },
     );
     expect(html).not.toContain("<script>");
     expect(html).not.toContain("<img");
@@ -190,11 +190,23 @@ describe("email", () => {
 
   it("money and dates follow the reader's settings", () => {
     const params = { budgetId: "1", budgetName: "Nov", categoryName: "ভাড়া", percent: 80, actualMinor: "12500000", amountMinor: "15000000", currency: "BDT" };
-    const bangla = renderNotification(NotificationType.BUDGET_THRESHOLD, params, { locale: "bn-BD", digitStyle: "bangla", grouping: "lakh", businessName: null });
+    const bangla = renderNotification(NotificationType.BUDGET_THRESHOLD, params, { locale: "bn-BD", digitStyle: "bangla", grouping: "lakh", businessName: null, businessId: null });
     expect(bangla.subject).toContain("৮০%");
     expect(bangla.text).toContain("৳১,২৫,০০০.০০");
-    const english = renderNotification(NotificationType.BUDGET_THRESHOLD, params, { locale: "en", digitStyle: "latin", grouping: "western", businessName: null });
+    const english = renderNotification(NotificationType.BUDGET_THRESHOLD, params, { locale: "en", digitStyle: "latin", grouping: "western", businessName: null, businessId: null });
     expect(english.text).toContain("৳125,000.00");
+  });
+
+  it("links open the right page in the web app: inside the business, or a whole-app page", () => {
+    const options = { locale: "en" as const, digitStyle: "latin" as const, grouping: "lakh" as const, businessName: "Shop", businessId: "b-1" };
+    expect(renderNotification(NotificationType.TASK_ASSIGNED, { taskId: "t-1", title: "Pay rent" }, options).url).toMatch(/\/b\/b-1\/tasks\?task=t-1$/);
+    expect(renderNotification(NotificationType.REMINDER_DUE, { title: "Call" }, options).url).toMatch(/\/b\/b-1\/tasks\?tab=reminders$/);
+    expect(renderNotification(NotificationType.RECURRING_FAILED, { scheduleId: "s-1", scheduleName: "Rent", occurrenceDate: "2026-11-01" }, options).url).toMatch(/\/b\/b-1\/recurring\?schedule=s-1$/);
+    expect(renderNotification(NotificationType.STATEMENT_IMPORT_FINISHED, { newLines: 2, needsReview: 1 }, options).url).toMatch(/\/b\/b-1\/statements$/);
+    // An invitation isn't inside a business yet.
+    expect(renderNotification(NotificationType.INVITATION, { token: "abc", businessName: "Shop", inviterName: "Rahim" }, options).url).toMatch(/[^/]\/invitations\/accept\?token=abc$/);
+    // A business page with no business has nowhere to go.
+    expect(renderNotification(NotificationType.GOAL_ACHIEVED, { goalName: "Save" }, { ...options, businessId: null }).url).toBeNull();
   });
 });
 
