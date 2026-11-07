@@ -15,6 +15,9 @@ const envSchema = z
     PORT: z.coerce.number().int().positive().default(5001),
     LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
     TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+    // Requests one address may make per minute, across the whole API. Many phones can share one
+    // mobile-network address, so raise it if real users see "Too many requests".
+    RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(30).max(100_000).default(300),
 
     DATABASE_URL: z.url(),
     REDIS_URL: z.url(),

@@ -40,6 +40,7 @@ const transaction = z.object({
   accountId: z.uuid(),
   toAccountId: z.uuid().nullable(),
   categoryId: z.uuid().nullable(),
+  contactId: z.uuid().nullable(),
   amountMinor: z.string(),
   feeMinor: z.string(),
   currency: z.string(),
@@ -80,6 +81,7 @@ addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/approve`, summary: "Approve and post. Must be someone other than the creator. Needs transactions.approve", params: transactionParams, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/reject`, summary: "Reject a pending transaction. Needs transactions.approve", params: transactionParams, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/reverse`, summary: "Reverse a posted transaction with a mirror-image journal. Needs ledger.reverse", params: transactionParams, body: transactionsValidation.reverse, response: transaction });
+addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/contact`, summary: "Set or clear the customer or supplier. Works after posting too (not on a voided one). Needs finance.write", params: transactionParams, body: transactionsValidation.setContact, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/dismiss-duplicate`, summary: "Mark a flagged transaction as not a duplicate. Needs finance.write", params: transactionParams, response: transaction });
 addPath("Transactions", { method: "post", path: `${transactions}/{transactionId}/attachments`, summary: "Attach an uploaded document. Needs finance.write", params: transactionParams, body: transactionsValidation.attach });
 addPath("Transactions", { method: "delete", path: `${transactions}/{transactionId}/attachments/{documentId}`, summary: "Remove an attachment. Needs finance.write", params: attachmentParams });

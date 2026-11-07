@@ -96,6 +96,40 @@ model Category {
   @@map("categories")
 }
 
+// A customer or supplier of one business. Transactions can name one, so you can see what each owes,
+// paid or was paid. Archived ones stay on old transactions but can't be picked for new ones.
+enum ContactKind {
+  CUSTOMER
+  SUPPLIER
+  BOTH
+}
+
+model Contact {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  workspaceId String      @map("workspace_id") @db.Uuid
+  businessId  String      @map("business_id") @db.Uuid
+  kind        ContactKind
+  name        String
+  // A shop or company name, when the contact is a person at one.
+  company     String?
+  phone       String?
+  email       String?
+  address     String?
+  // BIN or TIN, for VAT papers later.
+  taxId       String?     @map("tax_id")
+  notes       String?
+  isActive    Boolean     @default(true) @map("is_active")
+  createdBy   String      @map("created_by") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business     Business      @relation(fields: [businessId], references: [id])
+  transactions Transaction[]
+
+  @@index([businessId, isActive, name])
+  @@map("contacts")
+}
+
 model Transaction {
   id                String            @id @default(uuid(7)) @db.Uuid
   workspaceId       String            @map("workspace_id") @db.Uuid
@@ -106,6 +140,8 @@ model Transaction {
   accountId         String            @map("account_id") @db.Uuid
   toAccountId       String?           @map("to_account_id") @db.Uuid
   categoryId        String?           @map("category_id") @db.Uuid
+  // The customer or supplier, if any. Doesn't change the books, so it can be set after posting.
+  contactId         String?           @map("contact_id") @db.Uuid
   amountMinor       BigInt            @map("amount_minor")
   feeMinor          BigInt            @default(0) @map("fee_minor")
   currency          String            @db.Char(3)
@@ -133,6 +169,7 @@ model Transaction {
   account        FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
   toAccount      FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
   category       Category?               @relation(fields: [categoryId], references: [id])
+  contact        Contact?                @relation(fields: [contactId], references: [id], onDelete: Restrict)
   attachments    TransactionAttachment[]
   journalEntry   JournalEntry?           @relation("TransactionJournal", fields: [journalEntryId], references: [id])
   reversalEntry  JournalEntry?           @relation("TransactionReversalJournal", fields: [reversalEntryId], references: [id])
@@ -140,6 +177,7 @@ model Transaction {
   @@unique([businessId, number])
   @@index([businessId, txnDate(sort: Desc), id(sort: Desc)])
   @@index([businessId, accountId, amountMinor, txnDate])
+  @@index([businessId, contactId, txnDate(sort: Desc)])
   @@map("transactions")
 }
 

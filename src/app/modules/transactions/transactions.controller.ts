@@ -3,6 +3,7 @@ import { readIdempotencyKey } from "../../utils/idempotency.js";
 import { getRequestContext } from "../../utils/requestContext.js";
 import { sendResponse } from "../../utils/sendResponse.js";
 import type {
+  ISetContactBody,
   IAttachBody,
   IAttachmentParams,
   ICreateTransactionBody,
@@ -48,6 +49,12 @@ const update: RequestHandler = async (req, res) => {
 const dismissDuplicate: RequestHandler = async (req, res) => {
   const { transactionId } = req.validated.params as ITransactionParams;
   sendResponse(res, 200, await transactionsService.dismissDuplicate(req.business!, transactionId, getRequestContext(req)));
+};
+
+const setContact: RequestHandler = async (req, res) => {
+  const { transactionId } = req.validated.params as ITransactionParams;
+  const { contactId } = req.validated.body as ISetContactBody;
+  sendResponse(res, 200, await transactionsService.setContact(req.business!, transactionId, contactId, getRequestContext(req)));
 };
 
 const voidDraft: RequestHandler = async (req, res) => {
@@ -100,6 +107,7 @@ export const transactionsController = {
   getOne,
   update,
   dismissDuplicate,
+  setContact,
   voidDraft,
   post,
   approve,

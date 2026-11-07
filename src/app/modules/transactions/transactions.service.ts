@@ -14,6 +14,7 @@ import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import { businessesService } from "../businesses/businesses.service.js";
 import { categoriesService } from "../categories/categories.service.js";
+import { contactsService } from "../contacts/contacts.service.js";
 import { documentsService } from "../documents/documents.service.js";
 import { canPostToSoftClosed, journalsService } from "../journals/journals.service.js";
 import { ledgerAccountsService } from "../ledger-accounts/ledger-accounts.service.js";
@@ -254,6 +255,7 @@ const createWithin = async (
     accountId: body.accountId,
     toAccountId: body.toAccountId ?? null,
     categoryId: body.categoryId ?? null,
+    contactId: body.contactId ?? null,
     amountMinor: BigInt(body.amountMinor),
     feeMinor: BigInt(body.feeMinor),
     txnDate: toDbDate(body.txnDate),
@@ -263,6 +265,7 @@ const createWithin = async (
   assertTransferFields(draft);
   const currency = await resolveCurrency(tx, business.businessId, draft, body.currency);
   await assertCategoryFits(tx, business.businessId, draft);
+  if (draft.contactId) await contactsService.assertUsable(tx, business.businessId, draft.contactId);
   const duplicate = await findPossibleDuplicate(tx, business.businessId, draft);
   const { transactionPrefix } = await businessesService.getTransactionSettings(tx, business.businessId);
 
@@ -314,6 +317,7 @@ const list = async (business: BusinessContext, query: IListTransactionsQuery) =>
         ...(query.type ? { type: query.type } : {}),
         ...(query.accountId ? { accountId: query.accountId } : {}),
         ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+        ...(query.contactId ? { contactId: query.contactId } : {}),
         ...(query.possibleDuplicate !== undefined ? { possibleDuplicate: query.possibleDuplicate } : {}),
         ...(query.from || query.to
           ? {
@@ -382,6 +386,7 @@ const update = (
       accountId: body.accountId ?? before.accountId,
       toAccountId: body.toAccountId === undefined ? before.toAccountId : body.toAccountId,
       categoryId: body.categoryId === undefined ? before.categoryId : body.categoryId,
+      contactId: body.contactId === undefined ? before.contactId : body.contactId,
       amountMinor: body.amountMinor ? BigInt(body.amountMinor) : before.amountMinor,
       feeMinor: body.feeMinor ? BigInt(body.feeMinor) : before.feeMinor,
       txnDate: body.txnDate ? toDbDate(body.txnDate) : before.txnDate,
@@ -391,6 +396,7 @@ const update = (
     assertTransferFields(draft);
     const currency = await resolveCurrency(tx, business.businessId, draft);
     await assertCategoryFits(tx, business.businessId, draft);
+    if (draft.contactId && draft.contactId !== before.contactId) await contactsService.assertUsable(tx, business.businessId, draft.contactId);
 
     // Re-check only when a field the check uses changed, so a dismissed flag stays dismissed
     // after editing the description.
@@ -443,6 +449,24 @@ const dismissDuplicate = (business: BusinessContext, transactionId: string, cont
       entityType: "transaction",
       entityId: transactionId,
       before: { duplicateOfId: before.duplicateOfId },
+    });
+    return toDto(after);
+  });
+
+// Which customer or supplier it was with. The books don't change, so a posted one can be tagged too.
+const setContact = (business: BusinessContext, transactionId: string, contactId: string | null, context: RequestContext) =>
+  withBusinessScope(business, async (tx) => {
+    const before = await lockOrThrow(tx, business.businessId, transactionId);
+    if (before.status === "VOID") throw new AppError(409, ErrorCode.TRANSACTION_NOT_EDITABLE, { status: before.status });
+    if (contactId && contactId !== before.contactId) await contactsService.assertUsable(tx, business.businessId, contactId);
+    const after = await tx.transaction.update({ where: { id: transactionId }, data: { contactId } });
+    await auditService.recordForBusiness(tx, business, {
+      action: "transaction.contact_set",
+      context,
+      entityType: "transaction",
+      entityId: transactionId,
+      before: { contactId: before.contactId },
+      after: { contactId },
     });
     return toDto(after);
   });
@@ -595,6 +619,7 @@ export const transactionsService = {
   getOne,
   update,
   dismissDuplicate,
+  setContact,
   voidDraft,
   post,
   approve,

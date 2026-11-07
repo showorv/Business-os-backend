@@ -85,6 +85,7 @@ const create = (business: BusinessContext, body: ICreateScheduleBody, context: R
       accountId: body.accountId,
       toAccountId: body.toAccountId ?? null,
       categoryId,
+      contactId: null,
       amountMinor: BigInt(body.amountMinor),
       feeMinor: BigInt(body.feeMinor),
       txnDate: toDbDate(body.startDate),
@@ -193,7 +194,8 @@ const update = (business: BusinessContext, scheduleId: string, body: IUpdateSche
       amountMinor: body.amountMinor ? BigInt(body.amountMinor) : before.amountMinor,
       feeMinor: body.feeMinor ? BigInt(body.feeMinor) : before.feeMinor,
       txnDate: before.startDate,
-      referenceNo: null,
+      contactId: null,
+        referenceNo: null,
     });
 
     const status = body.status ?? before.status;

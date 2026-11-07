@@ -65,7 +65,7 @@ if (env.BULL_BOARD_PASSWORD) {
 
 app.use(helmet());
 app.use(cors({ origin: env.CORS_ORIGINS, credentials: true, exposedHeaders: ["X-Request-Id"] }));
-app.use(rateLimit({ name: "global", windowSeconds: 60, max: 300 }));
+app.use(rateLimit({ name: "global", windowSeconds: 60, max: env.RATE_LIMIT_PER_MINUTE }));
 // Before the JSON parser, because a signature is checked against the exact bytes the provider sent.
 app.use("/api/v1/webhooks/integrations", integrationWebhooksRouter);
 app.use(express.json({ limit: "1mb" }));

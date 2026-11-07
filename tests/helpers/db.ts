@@ -51,6 +51,7 @@ export const resetDatabase = () =>
     prisma.$executeRawUnsafe(`ALTER TABLE journal_entries ENABLE TRIGGER USER`),
     prisma.$executeRawUnsafe(`ALTER TABLE journal_lines ENABLE TRIGGER USER`),
     prisma.$executeRawUnsafe(`DELETE FROM categories`),
+    prisma.$executeRawUnsafe(`DELETE FROM contacts`),
     prisma.$executeRawUnsafe(`DELETE FROM financial_accounts`),
     prisma.$executeRawUnsafe(`DELETE FROM ledger_accounts`),
     prisma.$executeRawUnsafe(`DELETE FROM fiscal_periods`),

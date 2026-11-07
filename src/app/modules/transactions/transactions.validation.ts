@@ -16,6 +16,8 @@ const create = z.object({
   accountId: z.uuid(),
   toAccountId: z.uuid().optional(),
   categoryId: z.uuid().optional(),
+  // The customer or supplier. Can also be set or changed after posting.
+  contactId: z.uuid().optional(),
   amountMinor: positiveMinorAmountField,
   feeMinor: minorAmountField.default("0"),
   currency: currencyField.optional(),
@@ -33,6 +35,7 @@ const update = z
     accountId: z.uuid(),
     toAccountId: z.uuid().nullable(),
     categoryId: z.uuid().nullable(),
+    contactId: z.uuid().nullable(),
     amountMinor: positiveMinorAmountField,
     feeMinor: minorAmountField,
     txnDate: dateField,
@@ -49,6 +52,7 @@ const listQuery = z.object({
   type: transactionType.optional(),
   accountId: z.uuid().optional(),
   categoryId: z.uuid().optional(),
+  contactId: z.uuid().optional(),
   from: dateField.optional(),
   to: dateField.optional(),
   possibleDuplicate: z.stringbool().optional(),
@@ -56,9 +60,12 @@ const listQuery = z.object({
 
 const attach = z.object({ documentId: z.uuid() });
 
+// Which customer or supplier a transaction was with. Doesn't touch the books, so any status but VOID.
+const setContact = z.object({ contactId: z.uuid().nullable() });
+
 const reverse = z.object({
   entryDate: dateField.optional(),
   memo: textField(500).optional(),
 });
 
-export const transactionsValidation = { transactionParams, attachmentParams, create, update, listQuery, attach, reverse };
+export const transactionsValidation = { transactionParams, attachmentParams, create, update, listQuery, attach, setContact, reverse };

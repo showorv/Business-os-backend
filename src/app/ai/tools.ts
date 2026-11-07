@@ -575,7 +575,8 @@ export const TOOLS: Record<string, ToolSpec<z.ZodType>> = {
           amountMinor: amount,
           feeMinor: 0n,
           txnDate: toDbDate(args.date),
-          referenceNo: null,
+          contactId: null,
+        referenceNo: null,
         });
         return createProposal(tx, context, business!, "TRANSACTION", payload);
       });

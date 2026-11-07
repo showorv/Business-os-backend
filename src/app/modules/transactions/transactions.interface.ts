@@ -6,6 +6,7 @@ export type IAttachmentParams = z.infer<typeof transactionsValidation.attachment
 export type ICreateTransactionBody = z.infer<typeof transactionsValidation.create>;
 export type IUpdateTransactionBody = z.infer<typeof transactionsValidation.update>;
 export type IListTransactionsQuery = z.infer<typeof transactionsValidation.listQuery>;
+export type ISetContactBody = z.infer<typeof transactionsValidation.setContact>;
 export type IAttachBody = z.infer<typeof transactionsValidation.attach>;
 export type IReverseTransactionBody = z.infer<typeof transactionsValidation.reverse>;
 
@@ -15,6 +16,7 @@ export interface ITransactionDraft {
   accountId: string;
   toAccountId: string | null;
   categoryId: string | null;
+  contactId: string | null;
   amountMinor: bigint;
   feeMinor: bigint;
   txnDate: Date;

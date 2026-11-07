@@ -43,6 +43,7 @@ model Business {
 
   financialAccounts      FinancialAccount[]
   categories             Category[]
+  contacts               Contact[]
   transactions           Transaction[]
   documents              Document[]
   sequences              BusinessSequence[]

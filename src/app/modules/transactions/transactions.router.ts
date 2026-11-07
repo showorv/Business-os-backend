@@ -26,6 +26,7 @@ router.post(
   validate({ params, body: transactionsValidation.reverse }),
   transactionsController.reverse,
 );
+router.post("/:transactionId/contact", canWrite, validate({ params, body: transactionsValidation.setContact }), transactionsController.setContact);
 router.post("/:transactionId/dismiss-duplicate", canWrite, validate({ params }), transactionsController.dismissDuplicate);
 router.post(
   "/:transactionId/attachments",
