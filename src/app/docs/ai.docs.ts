@@ -23,6 +23,18 @@ const proposal = z.object({
   status: z.enum(["PENDING", "CONFIRMED", "REJECTED", "EXPIRED"]),
   resultId: z.uuid().nullable(),
   expiresAt: z.string(),
+  decidedAt: z.string().nullable().optional(),
+  createdAt: z.string().optional(),
+});
+
+const message = z.object({
+  id: z.uuid(),
+  role: z.enum(["USER", "ASSISTANT"]),
+  content: z.string(),
+  language: z.string().nullable(),
+  sources: z.array(source),
+  guardStatus: z.string().nullable(),
+  createdAt: z.string(),
 });
 
 const answer = z.object({
@@ -42,10 +54,10 @@ const documents = "/businesses/{businessId}/documents";
 addPath("AI", { method: "get", path: "/ai/status", summary: "Whether the assistant is switched on, and today's token use", response: z.object({ configured: z.boolean(), model: z.string().nullable(), tokensUsedToday: z.number(), dailyTokenLimit: z.number() }) });
 addPath("AI", { method: "post", path: "/ai/chat", summary: "Ask a question, in English or Bangla. Needs ai.use, and each tool checks its own permission", body: aiValidation.chat, response: answer });
 addPath("AI", { method: "get", path: "/ai/conversations", summary: "Your conversations", query: aiValidation.listQuery, response: page(z.object({ id: z.uuid(), title: z.string(), createdAt: z.string() })) });
-addPath("AI", { method: "get", path: "/ai/conversations/{conversationId}", summary: "One conversation with its messages and sources", params: aiValidation.conversationParams });
+addPath("AI", { method: "get", path: "/ai/conversations/{conversationId}", summary: "One conversation with its messages and sources", params: aiValidation.conversationParams, response: z.object({ id: z.uuid(), title: z.string(), createdAt: z.string(), messages: z.array(message) }) });
 addPath("AI", { method: "get", path: "/ai/proposals", summary: "Things the assistant suggested writing", query: aiValidation.proposalsQuery, response: page(proposal) });
 addPath("AI", { method: "post", path: "/ai/proposals/{proposalId}/confirm", summary: "Confirm a suggestion. It runs through the normal service, audited as via AI", params: aiValidation.proposalParams, body: aiValidation.confirm, response: proposal });
-addPath("AI", { method: "post", path: "/ai/proposals/{proposalId}/reject", summary: "Turn a suggestion down", params: aiValidation.proposalParams });
+addPath("AI", { method: "post", path: "/ai/proposals/{proposalId}/reject", summary: "Turn a suggestion down", params: aiValidation.proposalParams, response: z.object({ rejected: z.boolean() }) });
 
 const businessParams = z.object({ businessId: z.uuid() });
 addPath("Documents", { method: "get", path: `${documents}/search`, summary: "Search documents by meaning and exact words, in any language. Needs no AI key. Needs documents.read", params: businessParams, query: documentsValidation.searchQuery, response: z.array(z.object({ documentId: z.uuid(), fileName: z.string(), documentType: z.string(), page: z.number(), heading: z.string().nullable(), content: z.string(), score: z.number() })) });

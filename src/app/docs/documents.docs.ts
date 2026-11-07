@@ -15,6 +15,8 @@ const document = z.object({
   sha256: z.string().nullable(),
   scanStatus: z.string(),
   ingestStatus: z.string(),
+  createdBy: z.uuid(),
+  createdAt: z.string(),
 });
 
 const documents = "/businesses/{businessId}/documents";
