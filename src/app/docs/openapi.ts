@@ -6,6 +6,7 @@ import "./audit.docs.js";
 import "./businesses.docs.js";
 import "./finance.docs.js";
 import "./contacts.docs.js";
+import "./invoices.docs.js";
 import "./documents.docs.js";
 import "./accounting.docs.js";
 import "./analytics.docs.js";

@@ -12,7 +12,8 @@ import type { IContactTotals, ICreateContactBody, IListContactsQuery, IUpdateCon
 const MONEY_IN = ["INCOME"] as const;
 const MONEY_OUT = ["EXPENSE", "REFUND"] as const;
 
-// Posted totals for each contact, one row per currency, newest activity included.
+// Posted totals for each contact, one row per currency, newest activity included. Payments against
+// invoices and bills are added in, since they move money with the contact without being transactions.
 const totalsFor = async (tx: Prisma.TransactionClient, businessId: string, contactIds: string[]) => {
   const byContact = new Map<string, IContactTotals[]>();
   if (contactIds.length === 0) return byContact;
@@ -37,6 +38,27 @@ const totalsFor = async (tx: Prisma.TransactionClient, businessId: string, conta
     const last = group._max.txnDate ? fromDbDate(group._max.txnDate) : null;
     if (last && (!row.lastDate || last > row.lastDate)) row.lastDate = last;
     byContact.set(group.contactId!, list);
+  }
+
+  // Money against invoices and bills counts too: received for an invoice, paid for a bill.
+  const payments = await tx.invoicePayment.findMany({
+    where: { businessId, voidedAt: null, invoice: { contactId: { in: contactIds } } },
+    select: { amountMinor: true, paidOn: true, invoice: { select: { contactId: true, kind: true, currency: true } } },
+  });
+  for (const payment of payments) {
+    const { contactId, kind, currency } = payment.invoice;
+    const list = byContact.get(contactId) ?? [];
+    let row = list.find((item) => item.currency === currency);
+    if (!row) {
+      row = { currency, receivedMinor: "0", paidMinor: "0", transactions: 0, lastDate: null };
+      list.push(row);
+    }
+    if (kind === "SALE") row.receivedMinor = (BigInt(row.receivedMinor) + payment.amountMinor).toString();
+    else row.paidMinor = (BigInt(row.paidMinor) + payment.amountMinor).toString();
+    row.transactions += 1;
+    const paidOn = fromDbDate(payment.paidOn);
+    if (!row.lastDate || paidOn > row.lastDate) row.lastDate = paidOn;
+    byContact.set(contactId, list);
   }
   return byContact;
 };

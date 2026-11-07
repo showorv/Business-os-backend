@@ -6,6 +6,7 @@ export interface OutgoingEmail {
   subject: string;
   text: string;
   html: string;
+  attachments?: { filename: string; content: Buffer; contentType: string }[];
 }
 
 // One small adapter, so changing email provider touches only this file.

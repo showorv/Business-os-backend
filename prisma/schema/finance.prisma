@@ -65,6 +65,7 @@ model FinancialAccount {
   integrationConnections IntegrationConnection[]
   statementImports       StatementImport[]
   statementLines         StatementLine[]
+  invoicePayments        InvoicePayment[]
 
   @@unique([businessId, name])
   @@map("financial_accounts")
@@ -91,6 +92,7 @@ model Category {
   transactions   Transaction[]
   budgetLines    BudgetLine[]
   statementRules StatementRule[]
+  invoiceLines   InvoiceLine[]
 
   @@unique([businessId, type, name])
   @@map("categories")
@@ -125,6 +127,7 @@ model Contact {
 
   business     Business      @relation(fields: [businessId], references: [id])
   transactions Transaction[]
+  invoices     Invoice[]
 
   @@index([businessId, isActive, name])
   @@map("contacts")

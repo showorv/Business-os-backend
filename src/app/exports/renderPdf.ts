@@ -17,13 +17,13 @@ const fontFace = (subset: string, weight: number) => {
 };
 
 let cachedFonts: string | null = null;
-const fontStyles = () => {
+export const fontStyles = () => {
   cachedFonts ??= ["latin", "bengali"].flatMap((subset) => [400, 700].map((weight) => fontFace(subset, weight))).join("\n");
   return cachedFonts;
 };
 
 // Account names and business names are user-typed, so everything is escaped.
-const escapeHtml = (text: string) =>
+export const escapeHtml = (text: string) =>
   text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 
 const toHtmlCell = (cell: Cell, table: ReportTable, options: ExportOptions) => {
@@ -72,7 +72,8 @@ tr { page-break-inside: avoid; }
 </body>
 </html>`;
 
-export const renderPdf = async (table: ReportTable, options: ExportOptions) => {
+// Lays out any page of our own HTML as an A4 PDF. Invoices use it too.
+export const htmlToPdf = async (html: string) => {
   const browser = await puppeteer.launch({ headless: true, args: env.CHROME_NO_SANDBOX ? ["--no-sandbox"] : [] });
   try {
     const page = await browser.newPage();
@@ -86,7 +87,7 @@ export const renderPdf = async (table: ReportTable, options: ExportOptions) => {
       else void request.abort();
     });
 
-    await page.setContent(toHtml(table, options), { waitUntil: "load" });
+    await page.setContent(html, { waitUntil: "load" });
     await page.evaluateHandle("document.fonts.ready");
     const pdf = await page.pdf({
       format: "A4",
@@ -98,3 +99,5 @@ export const renderPdf = async (table: ReportTable, options: ExportOptions) => {
     await browser.close();
   }
 };
+
+export const renderPdf = (table: ReportTable, options: ExportOptions) => htmlToPdf(toHtml(table, options));

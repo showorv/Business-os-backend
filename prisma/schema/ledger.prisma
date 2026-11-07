@@ -117,6 +117,9 @@ model JournalEntry {
   reconciliation      Reconciliation?
   transferOut         IntercompanyTransfer? @relation("IntercompanyFromEntry")
   transferIn          IntercompanyTransfer? @relation("IntercompanyToEntry")
+  invoice             Invoice?
+  invoicePayment      InvoicePayment?       @relation("InvoicePaymentJournal")
+  invoicePaymentVoid  InvoicePayment?       @relation("InvoicePaymentReversal")
 
   @@unique([businessId, entryNo])
   @@index([businessId, entryDate(sort: Desc), id(sort: Desc)])

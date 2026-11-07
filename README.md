@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.4 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.5 done) |
 
 ## Run it
 
@@ -233,8 +233,8 @@ requireAuth              who are you?
 | 11.2 | Payments through a demo gateway (success, fail, cancel), receipts, reminders, grace; SSLCommerz and bKash plug in later | ✅ Done |
 | 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ✅ Done |
 | 11.4 | Customers and suppliers | ✅ Done |
-| 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ⬜ Next |
-| 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ |
+| 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ✅ Done |
+| 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ Next |
 | 11.7 | Products and stock | ⬜ |
 | 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ |
 
@@ -363,13 +363,48 @@ Each business keeps a list of the people and shops it sells to and buys from, un
 - **Who can see them:** the same rules as money: `finance.read` to see, `finance.write` to change. A viewer without money access can't see contacts either.
 - **Audit:** `contact.created`, `contact.updated`, `contact.archived`, `transaction.contact_set`.
 
-What a contact still owes, or what you owe them (baki), comes with invoices and bills in 11.5.
+What a contact still owes, or what you owe them (baki), comes from invoices and bills (11.5, below).
 
 **Database.** Migration `20261109090000_contacts`: the `contacts` table with row-level security, and `transactions.contact_id`.
 
 **Also changed.** The limit on requests per minute from one address is now a setting, `RATE_LIMIT_PER_MINUTE` (default 300). Many phones can share one mobile-network address, so raise it if real users see "Too many requests". The browser tests' backend uses 3000, because every test there comes from the same address.
 
 **How it was checked.** 5 new tests (`tests/contacts.test.ts`): adding, listing by kind and search, changing and archiving with audit entries; a bad email and an empty change refused; totals (income in, expenses and refunds out, drafts and other contacts left out) and the transaction filter; tagging a posted transaction and refusing archived or other businesses' contacts; and the money permissions. All 763 tests pass.
+
+### Step 11.5: Invoices, bills and dues (baki)
+
+An **invoice** is what a customer owes the business for a sale on credit. A **bill** is what the business owes a supplier. Both live in one table and work the same way, under `/businesses/:businessId/invoices` with `kind` `SALE` or `BILL`.
+
+**The life of an invoice**
+```
+DRAFT ── issue ──> ISSUED ── part payment ──> PARTIALLY_PAID ── rest ──> PAID
+  │                  │                                                    │
+delete            void (only with no payments)        undo a payment moves it back
+```
+- **Draft:** a contact, a date, a due date, an optional reference (a customer's order number, or the supplier's own bill number), notes, and up to 100 lines. Each line has a description, a quantity (up to 3 decimals, so 2.5 kg works), a unit price and a category. An invoice uses income categories, a bill expense categories. Drafts can be changed or deleted; nothing is in the books yet.
+- **Issue:** gives the next number (`INV-2026-000001`, `BILL-2026-000001`, no gaps, each business counts on its own) and posts one journal entry on the invoice date:
+  - Invoice: **debit Accounts Receivable (1200)**, credit each line's revenue account.
+  - Bill: debit each line's expense account, **credit Accounts Payable (2000)**.
+  So the sale shows in the profit and loss when it is made, not when the money arrives.
+- **Payment:** money in (or out) through any of the business's accounts, up to what is still due, on its own date. It posts: cash or bank debited, receivables credited (the other way round for a bill). The account's balance moves too. A payment entered by mistake is **undone** with a reversing entry; the record stays, marked undone.
+- **Void:** an issued invoice with no payments can be voided with a reason; its entry is reversed. Undo the payments first if it has any.
+- Two payments at the same moment can't both pass the "how much is due" check: the invoice row is locked while one is saved.
+
+**Dues (baki).** `GET /invoices/aging?kind=SALE` (or `BILL`) adds up what is still owed on open invoices, per contact, by how late it is: not due yet, 1–30, 31–60, 61–90 and over 90 days past the due date. It can be worked out as of an earlier day (`asOf`), and for one contact (`contactId`). Biggest balances come first.
+
+**PDF and email.** `GET /invoices/:id/pdf` gives the invoice or bill as an A4 PDF, in English or Bangla (`locale=bn-BD` prints Bangla digits), made by the same browser-based renderer as report PDFs, so Bangla letters join correctly. A draft is stamped DRAFT and a void one VOID. `POST /invoices/:id/email` sends an issued invoice to the customer's email (or another address), with the PDF attached and an optional message. It needs `SMTP_URL`; without it the answer is `EMAIL_NOT_CONFIGURED`.
+
+**A contact's totals** now include payments on their invoices and bills, so "received from them" and "paid to them" match what really moved.
+
+**Errors:** `INVOICE_NOT_DRAFT`, `INVOICE_NOT_OPEN`, `INVOICE_TOTAL_ZERO`, `INVOICE_HAS_PAYMENTS`, `PAYMENT_EXCEEDS_DUE` (with `dueMinor`), `PAYMENT_ALREADY_VOID`, `CONTACT_KIND_MISMATCH` (an invoice needs a customer, a bill a supplier; "both" fits either), `CATEGORY_TYPE_MISMATCH` (with the line number), `INVOICE_NOT_SENDABLE`, `EMAIL_NOT_CONFIGURED`.
+
+**Permissions and audit:** `finance.read` to see, `finance.write` to change. Audit entries: `invoice.created`, `invoice.updated`, `invoice.deleted`, `invoice.issued`, `invoice.payment_recorded`, `invoice.payment_voided`, `invoice.voided`, `invoice.emailed`.
+
+**Not yet:** VAT on lines (11.6), stock items on lines (11.7), invoices in another currency (only the business's own currency for now), and matching invoice payments to bank statement lines.
+
+**Database.** Migration `20261110090000_invoices_bills`: the `invoices`, `invoice_lines` and `invoice_payments` tables with row-level security, plus checks in the database itself (paid never above the total, due date not before the date, an issued invoice always has a number). Run `npm run db:deploy` on Neon.
+
+**How it was checked.** 10 new tests (`tests/invoices.test.ts`): line amounts and rounding, and that the posting rules always balance; drafting, changing and issuing with numbers in order, and the books moving only on issue; part and full payments, paying too much refused, undoing a payment and voiding; a bill paid from the bank; the wrong contact kind or category side, a zero invoice and bad dates refused; the list filters and another business kept out; baki by age, per contact and as of an earlier day; the PDF and the email with its attachment; and the money permissions. All 773 tests pass.
 
 ## What was built in Phase 8
 
@@ -1515,7 +1550,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3) and contacts (11.4) migrations, all still to run.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4) and invoices (11.5) migrations, all still to run.
    Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.

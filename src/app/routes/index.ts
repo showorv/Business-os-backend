@@ -10,6 +10,7 @@ import { budgetsRouter } from "../modules/budgets/budgets.router.js";
 import { businessesRouter } from "../modules/businesses/businesses.router.js";
 import { categoriesRouter } from "../modules/categories/categories.router.js";
 import { contactsRouter } from "../modules/contacts/contacts.router.js";
+import { invoicesRouter } from "../modules/invoices/invoices.router.js";
 import { consolidatedRouter } from "../modules/consolidated/consolidated.router.js";
 import { documentsRouter } from "../modules/documents/documents.router.js";
 import { exchangeRatesRouter } from "../modules/exchange-rates/exchange-rates.router.js";
@@ -58,6 +59,7 @@ const moduleRoutes = [
   { path: "/businesses/:businessId/accounts", router: accountsRouter },
   { path: "/businesses/:businessId/categories", router: categoriesRouter },
   { path: "/businesses/:businessId/contacts", router: contactsRouter },
+  { path: "/businesses/:businessId/invoices", router: invoicesRouter },
   { path: "/businesses/:businessId/documents", router: documentsRouter },
   { path: "/businesses/:businessId/transactions", router: transactionsRouter },
   { path: "/businesses/:businessId/ledger-accounts", router: ledgerAccountsRouter },

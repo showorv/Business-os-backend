@@ -88,3 +88,45 @@ const RULES: Record<PostingInput["type"], PostingRule> = {
 };
 
 export const buildTransactionLines = (input: PostingInput) => RULES[input.type](input);
+
+// ---------------------------------------------------------------------------
+// Invoices and bills (11.5)
+// ---------------------------------------------------------------------------
+
+// A sale on credit: Dr receivables for the total, Cr each revenue account for its lines.
+// A bill: Dr each expense account, Cr payables for the total. Lines on one account are added up.
+export const buildInvoiceLines = (input: {
+  kind: "SALE" | "BILL";
+  controlLedgerId: string;
+  memo: string;
+  lines: { ledgerAccountId: string; amountMinor: bigint }[];
+}): JournalLineInput[] => {
+  const byLedger = new Map<string, bigint>();
+  for (const line of input.lines) {
+    if (line.amountMinor > 0n) byLedger.set(line.ledgerAccountId, (byLedger.get(line.ledgerAccountId) ?? 0n) + line.amountMinor);
+  }
+  const total = [...byLedger.values()].reduce((sum, amount) => sum + amount, 0n);
+  const detail = [...byLedger].map(([ledgerAccountId, amount]) =>
+    input.kind === "SALE" ? credit(ledgerAccountId, amount) : debit(ledgerAccountId, amount),
+  );
+  const control = input.kind === "SALE" ? debit(input.controlLedgerId, total, input.memo) : credit(input.controlLedgerId, total, input.memo);
+  return [control, ...detail];
+};
+
+// Money against an invoice: Dr where it landed, Cr receivables. Against a bill: Dr payables, Cr where it left.
+export const buildInvoicePaymentLines = (input: {
+  kind: "SALE" | "BILL";
+  controlLedgerId: string;
+  accountLedgerId: string;
+  amountMinor: bigint;
+}): JournalLineInput[] =>
+  input.kind === "SALE"
+    ? [debit(input.accountLedgerId, input.amountMinor), credit(input.controlLedgerId, input.amountMinor)]
+    : [debit(input.controlLedgerId, input.amountMinor), credit(input.accountLedgerId, input.amountMinor)];
+
+// quantity × unit price, rounded half up to the minor unit. Quantity has up to three decimals.
+export const lineAmountMinor = (quantity: string, unitPriceMinor: bigint) => {
+  const [whole, fraction = ""] = quantity.split(".");
+  const milli = BigInt(whole!) * 1000n + BigInt(fraction.padEnd(3, "0"));
+  return (milli * unitPriceMinor + 500n) / 1000n;
+};

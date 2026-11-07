@@ -132,6 +132,23 @@ export const ErrorCode = {
   PAYMENT_GATEWAY_UNAVAILABLE: "PAYMENT_GATEWAY_UNAVAILABLE",
   // A coupon that doesn't exist, has ended, is used up or isn't for this plan. params.reason says which.
   COUPON_INVALID: "COUPON_INVALID",
+  // Invoices and bills (11.5). Only a draft can be changed or deleted.
+  INVOICE_NOT_DRAFT: "INVOICE_NOT_DRAFT",
+  // Payments go only on an issued, unpaid invoice or bill.
+  INVOICE_NOT_OPEN: "INVOICE_NOT_OPEN",
+  // Nothing to issue: every line is zero.
+  INVOICE_TOTAL_ZERO: "INVOICE_TOTAL_ZERO",
+  // Void its payments first, so the money record stays right.
+  INVOICE_HAS_PAYMENTS: "INVOICE_HAS_PAYMENTS",
+  // More than is still due. params.dueMinor says how much is left.
+  PAYMENT_EXCEEDS_DUE: "PAYMENT_EXCEEDS_DUE",
+  PAYMENT_ALREADY_VOID: "PAYMENT_ALREADY_VOID",
+  // An invoice needs a customer, a bill a supplier (BOTH fits either).
+  CONTACT_KIND_MISMATCH: "CONTACT_KIND_MISMATCH",
+  // Sending invoices by email needs SMTP set up on the server.
+  EMAIL_NOT_CONFIGURED: "EMAIL_NOT_CONFIGURED",
+  // Only a sales invoice that is issued can be sent, and only somewhere with an address.
+  INVOICE_NOT_SENDABLE: "INVOICE_NOT_SENDABLE",
   // The platform admin panel: only for platform admins, and only with two-step verification on.
   PLATFORM_ADMIN_ONLY: "PLATFORM_ADMIN_ONLY",
   PLATFORM_ADMIN_MFA_REQUIRED: "PLATFORM_ADMIN_MFA_REQUIRED",

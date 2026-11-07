@@ -44,6 +44,7 @@ model Business {
   financialAccounts      FinancialAccount[]
   categories             Category[]
   contacts               Contact[]
+  invoices               Invoice[]
   transactions           Transaction[]
   documents              Document[]
   sequences              BusinessSequence[]
