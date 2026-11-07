@@ -25,7 +25,9 @@
     "db:provision": "tsx src/scripts/provision-businesses.ts",
     "ledger:verify": "tsx src/scripts/verify-ledger.ts",
     "worker": "tsx watch --import ./src/instrument.ts src/worker.ts",
-    "start:worker": "node --import ./dist/instrument.js dist/worker.js"
+    "start:worker": "node --import ./dist/instrument.js dist/worker.js",
+    "admin:grant": "tsx src/scripts/platform-admin.ts grant",
+    "admin:revoke": "tsx src/scripts/platform-admin.ts revoke"
   },
   "keywords": [],
   "author": "",

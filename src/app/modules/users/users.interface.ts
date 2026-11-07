@@ -9,6 +9,8 @@ export interface IPublicUser {
   name: string;
   status: string;
   mfaEnabled: boolean;
+  // Opens the platform admin panel (it also needs two-step verification turned on).
+  isPlatformAdmin: boolean;
   locale: string;
   digitStyle: string;
   lastLoginAt: Date | null;

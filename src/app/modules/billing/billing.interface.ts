@@ -28,3 +28,4 @@ export interface PaymentOutcome {
   method?: string;
   reason?: string;
 }
+export type IPriceCheckBody = z.infer<typeof billingValidation.priceCheck>;

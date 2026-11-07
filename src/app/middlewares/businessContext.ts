@@ -32,6 +32,7 @@ export const requireMembership: RequestHandler = async (req, _res, next) => {
     throw new AppError(404, ErrorCode.NOT_FOUND);
   }
 
+  if (business.workspaceSuspended) throw new AppError(403, ErrorCode.WORKSPACE_SUSPENDED);
   req.business = business;
   next();
 };

@@ -16,6 +16,8 @@ export interface BusinessContext {
   permissions: string[];
   // Beyond the workspace plan's business limit after the plan lapsed: readable, but nothing can change.
   planLocked?: boolean;
+  // The platform admin suspended the workspace: nobody may open the business.
+  workspaceSuspended?: boolean;
 }
 
 export interface IAddMemberInput {

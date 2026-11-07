@@ -10,6 +10,7 @@ const router = Router();
 router.get("/plans", validate({ query: billingValidation.plansQuery }), billingController.plans);
 router.get("/me", requireAuth, billingController.mine);
 
+router.post("/price", requireAuth, validate({ body: billingValidation.priceCheck }), billingController.checkPrice);
 router.post("/checkout", requireAuth, validate({ body: billingValidation.checkout }), billingController.checkout);
 router.get("/payments", requireAuth, billingController.listPayments);
 router.get("/payments/:paymentId", requireAuth, validate({ params: billingValidation.paymentParams }), billingController.getPayment);

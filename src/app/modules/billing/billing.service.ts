@@ -1,5 +1,6 @@
 import { logger } from "../../../lib/logger.js";
 import { paymentGateway } from "../../../lib/payments.js";
+import { env } from "../../config/env.config.js";
 import type { Prisma } from "../../../lib/prisma.js";
 import { prisma } from "../../../lib/prisma.js";
 import { invalidateBusinessContext } from "../../utils/businessContextCache.js";
@@ -8,14 +9,12 @@ import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import { NotificationType } from "../notifications/notifications.interface.js";
 import { notificationsService } from "../notifications/notifications.service.js";
-import type { Entitlements, ICheckoutBody, IDemoOutcomeBody, PaymentOutcome, PlanLimit, PlanState } from "./billing.interface.js";
+import { platformService } from "../platform/platform.service.js";
+import type { Entitlements, ICheckoutBody, IDemoOutcomeBody, IPriceCheckBody, PaymentOutcome, PlanLimit, PlanState } from "./billing.interface.js";
 
 export const FREE_PLAN = "free";
-// New sign-ups try Pro for this long, then fall back to Free unless they pay.
-export const TRIAL_PLAN = "pro";
-export const TRIAL_DAYS = 14;
-// A paid plan keeps working this long after it ends, so a late payment loses nothing.
-export const GRACE_DAYS = 7;
+// The trial's length and plan, and the grace days after a paid plan ends, are platform settings
+// (see platform.service.ts), changed from the admin panel.
 const DAY_MS = 86_400_000;
 const MB = 1024 * 1024;
 
@@ -24,7 +23,7 @@ type Subscription = Prisma.WorkspaceSubscriptionGetPayload<{ include: { plan: tr
 const freePlan = () => prisma.plan.findUniqueOrThrow({ where: { key: FREE_PLAN } });
 
 // The plan a workspace actually has right now, from its subscription and the clock.
-const resolve = async (subscription: Subscription | null, now: Date): Promise<Entitlements> => {
+const resolve = async (subscription: Subscription | null, now: Date, graceDays: number): Promise<Entitlements> => {
   if (!subscription || subscription.planKey === FREE_PLAN) {
     return { plan: subscription?.plan ?? (await freePlan()), state: "free", subscription, graceEndsAt: null };
   }
@@ -32,19 +31,59 @@ const resolve = async (subscription: Subscription | null, now: Date): Promise<En
   const stateWhileRunning: PlanState = source === "TRIAL" ? "trial" : source === "GRANT" ? "granted" : "active";
   if (!endsAt || now < endsAt) return { plan: subscription.plan, state: stateWhileRunning, subscription, graceEndsAt: null };
 
-  const graceEndsAt = source === "PAID" ? new Date(endsAt.getTime() + GRACE_DAYS * DAY_MS) : null;
+  const graceEndsAt = source === "PAID" ? new Date(endsAt.getTime() + graceDays * DAY_MS) : null;
   if (graceEndsAt && now < graceEndsAt) return { plan: subscription.plan, state: "grace", subscription, graceEndsAt };
   return { plan: await freePlan(), state: "expired", subscription, graceEndsAt };
 };
 
-const entitlements = async (workspaceId: string, now = new Date()) =>
-  resolve(await prisma.workspaceSubscription.findUnique({ where: { workspaceId }, include: { plan: true } }), now);
+// The same answer as resolve(), from the subscription alone: for lists of many workspaces.
+export const stateOf = (subscription: { planKey: string; source: string; endsAt: Date | null } | null, now: Date, graceDays: number): PlanState => {
+  if (!subscription || subscription.planKey === FREE_PLAN) return "free";
+  const running = subscription.source === "TRIAL" ? "trial" : subscription.source === "GRANT" ? "granted" : "active";
+  if (!subscription.endsAt || now < subscription.endsAt) return running;
+  if (subscription.source === "PAID" && now.getTime() < subscription.endsAt.getTime() + graceDays * DAY_MS) return "grace";
+  return "expired";
+};
 
-// Every new workspace starts with a Pro trial.
-const startTrial = (tx: Prisma.TransactionClient, workspaceId: string, now = new Date()) =>
-  tx.workspaceSubscription.create({
-    data: { workspaceId, planKey: TRIAL_PLAN, source: "TRIAL", endsAt: new Date(now.getTime() + TRIAL_DAYS * DAY_MS) },
+// A Prisma filter for workspaces in one state, matching stateOf().
+export const whereState = (state: PlanState, now: Date, graceDays: number): Prisma.WorkspaceWhereInput => {
+  const graceCut = new Date(now.getTime() - graceDays * DAY_MS);
+  const paidPlan = { planKey: { not: FREE_PLAN } };
+  switch (state) {
+    case "free":
+      return { OR: [{ subscription: null }, { subscription: { planKey: FREE_PLAN } }] };
+    case "trial":
+      return { subscription: { ...paidPlan, source: "TRIAL", endsAt: { gt: now } } };
+    case "active":
+      return { subscription: { ...paidPlan, source: "PAID", endsAt: { gt: now } } };
+    case "grace":
+      return { subscription: { ...paidPlan, source: "PAID", endsAt: { lte: now, gt: graceCut } } };
+    case "granted":
+      return { subscription: { ...paidPlan, source: "GRANT", OR: [{ endsAt: null }, { endsAt: { gt: now } }] } };
+    case "expired":
+      return {
+        subscription: { ...paidPlan, OR: [{ source: { in: ["TRIAL", "GRANT"] }, endsAt: { lte: now } }, { source: "PAID", endsAt: { lte: graceCut } }] },
+      };
+  }
+};
+
+const entitlements = async (workspaceId: string, now = new Date()) => {
+  const [subscription, { graceDays }] = await Promise.all([
+    prisma.workspaceSubscription.findUnique({ where: { workspaceId }, include: { plan: true } }),
+    platformService.settings(),
+  ]);
+  return resolve(subscription, now, graceDays);
+};
+
+// Every new workspace starts with a trial of the plan the admin chose, or on Free when trials are off.
+const startTrial = async (tx: Prisma.TransactionClient, workspaceId: string, now = new Date()) => {
+  const { trialDays, trialPlanKey } = await platformService.settings();
+  const plan = trialDays > 0 ? await tx.plan.findUnique({ where: { key: trialPlanKey } }) : null;
+  if (!plan || plan.key === FREE_PLAN) return tx.workspaceSubscription.create({ data: { workspaceId, planKey: FREE_PLAN, source: "FREE" } });
+  return tx.workspaceSubscription.create({
+    data: { workspaceId, planKey: plan.key, source: "TRIAL", endsAt: new Date(now.getTime() + trialDays * DAY_MS) },
   });
+};
 
 const limitError = (limit: PlanLimit, max: number, plan: string) => new AppError(403, ErrorCode.PLAN_LIMIT, { limit, max, plan });
 
@@ -215,15 +254,41 @@ const assertOwner = async (auth: Auth) => {
   if (workspace.ownerUserId !== auth.userId) throw new AppError(403, ErrorCode.BILLING_OWNER_ONLY);
 };
 
-// The person leaves for the payment page. The price comes from the plan now, never from the browser.
+type CouponProblem = "not_found" | "inactive" | "expired" | "used_up" | "wrong_plan";
+const couponError = (reason: CouponProblem) => new AppError(400, ErrorCode.COUPON_INVALID, { reason });
+
+// The plan's price for this cycle, less any coupon. Always worked out here, never taken from the browser.
+const priceFor = async (planKey: string, billingCycle: "MONTHLY" | "YEARLY", couponCode?: string) => {
+  const plan = await prisma.plan.findUnique({ where: { key: planKey } });
+  const list = plan ? (billingCycle === "YEARLY" ? plan.priceYearlyMinor : plan.priceMonthlyMinor) : 0n;
+  if (!plan || !plan.isPublic || list <= 0n) throw new AppError(400, ErrorCode.PLAN_NOT_FOR_SALE, { planKey });
+  if (!couponCode) return { plan, listAmountMinor: list, discountMinor: 0n, amountMinor: list, couponCode: null };
+
+  const coupon = await prisma.coupon.findUnique({ where: { code: couponCode } });
+  if (!coupon) throw couponError("not_found");
+  if (!coupon.active) throw couponError("inactive");
+  if (coupon.expiresAt && coupon.expiresAt <= new Date()) throw couponError("expired");
+  if (coupon.maxRedemptions !== null && coupon.redemptions >= coupon.maxRedemptions) throw couponError("used_up");
+  if (coupon.planKeys.length > 0 && !coupon.planKeys.includes(plan.key)) throw couponError("wrong_plan");
+
+  const off = coupon.percentOff !== null ? (list * BigInt(coupon.percentOff)) / 100n : (coupon.amountOffMinor ?? 0n);
+  const discount = off > list ? list : off;
+  return { plan, listAmountMinor: list, discountMinor: discount, amountMinor: list - discount, couponCode: coupon.code };
+};
+
+const checkPrice = async (body: IPriceCheckBody) => {
+  const { plan, ...price } = await priceFor(body.planKey, body.billingCycle, body.couponCode);
+  return { planKey: plan.key, billingCycle: body.billingCycle, currency: plan.currency, ...price };
+};
+
+// The person leaves for the payment page. A coupon that takes the whole price off needs no payment page:
+// the plan is given straight away, with a receipt for nothing.
 const checkout = async (auth: Auth, body: ICheckoutBody, context: RequestContext) => {
   await assertOwner(auth);
-  const gateway = paymentGateway();
-  if (!gateway) throw new AppError(503, ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE);
-
-  const plan = await prisma.plan.findUnique({ where: { key: body.planKey } });
-  const amount = plan ? (body.billingCycle === "YEARLY" ? plan.priceYearlyMinor : plan.priceMonthlyMinor) : 0n;
-  if (!plan || !plan.isPublic || amount <= 0n) throw new AppError(400, ErrorCode.PLAN_NOT_FOR_SALE, { planKey: body.planKey });
+  const { plan, listAmountMinor, discountMinor, amountMinor, couponCode } = await priceFor(body.planKey, body.billingCycle, body.couponCode);
+  const free = amountMinor === 0n;
+  const gateway = free ? null : paymentGateway();
+  if (!free && !gateway) throw new AppError(503, ErrorCode.PAYMENT_GATEWAY_UNAVAILABLE);
 
   const current = await entitlements(auth.workspaceId);
   if (current.state === "granted" && current.subscription?.endsAt === null && current.subscription.planKey === plan.key) {
@@ -237,9 +302,12 @@ const checkout = async (auth: Auth, body: ICheckoutBody, context: RequestContext
         workspaceId: auth.workspaceId,
         planKey: plan.key,
         billingCycle: body.billingCycle,
-        amountMinor: amount,
+        amountMinor,
+        listAmountMinor,
+        discountMinor,
+        couponCode,
         currency: plan.currency,
-        gateway: gateway.name,
+        gateway: gateway?.name ?? "coupon",
         createdBy: auth.userId,
         expiresAt: new Date(Date.now() + CHECKOUT_MINUTES * 60_000),
       },
@@ -251,19 +319,23 @@ const checkout = async (auth: Auth, body: ICheckoutBody, context: RequestContext
       actorUserId: auth.userId,
       entityType: "payment",
       entityId: created.id,
-      after: { planKey: plan.key, billingCycle: body.billingCycle, amountMinor: String(amount), gateway: gateway.name },
+      after: { planKey: plan.key, billingCycle: body.billingCycle, amountMinor: String(amountMinor), couponCode, gateway: created.gateway },
     });
     return created;
   });
 
+  if (!gateway) {
+    await settle(payment.id, { status: "PAID", method: "coupon" }, context, auth.userId);
+    return { paymentId: payment.id, redirectUrl: `${env.APP_URL}/settings/plan?payment=${payment.id}`, amountMinor, currency: plan.currency };
+  }
   const { redirectUrl } = await gateway.startCheckout({
     paymentId: payment.id,
-    amountMinor: amount,
+    amountMinor,
     currency: plan.currency,
     description: `${plan.name} (${body.billingCycle === "YEARLY" ? "1 year" : "1 month"})`,
     customer: { name: user.name, email: user.email },
   });
-  return { paymentId: payment.id, redirectUrl, amountMinor: amount, currency: plan.currency };
+  return { paymentId: payment.id, redirectUrl, amountMinor, currency: plan.currency };
 };
 
 // When the new period starts: after the time already covered on the same plan, otherwise now.
@@ -314,6 +386,7 @@ const settle = async (paymentId: string, outcome: PaymentOutcome, context: Reque
     const [sequence] = await tx.$queryRaw<{ value: bigint }[]>`SELECT nextval('payment_receipt_seq') AS value`;
     const receiptNumber = `BOS-${now.getUTCFullYear()}-${String(sequence!.value).padStart(6, "0")}`;
 
+    if (payment.couponCode) await tx.$executeRaw`UPDATE coupons SET redemptions = redemptions + 1, updated_at = now() WHERE code = ${payment.couponCode}::citext`;
     const paid = await tx.payment.update({
       where: { id: paymentId },
       data: { status: "PAID", gatewayRef: outcome.gatewayRef, method: outcome.method, receiptNumber, periodStart, periodEnd, paidAt: now },
@@ -367,6 +440,9 @@ const toPaymentDto = (
   planNameBn: payment.plan.nameBn,
   billingCycle: payment.billingCycle,
   amountMinor: payment.amountMinor,
+  listAmountMinor: payment.listAmountMinor,
+  discountMinor: payment.discountMinor,
+  couponCode: payment.couponCode,
   currency: payment.currency,
   // A checkout nobody finished shows as cancelled once it can no longer be paid.
   status: payment.status === "PENDING" && payment.expiresAt < new Date() ? "CANCELLED" : payment.status,
@@ -427,8 +503,9 @@ const completeDemo = async (auth: Auth, paymentId: string, body: IDemoOutcomeBod
 
 // Each reminder's key includes the end date, so a renewed plan gets fresh reminders and none goes twice.
 const sendPlanReminders = async (now = new Date()) => {
+  const { graceDays } = await platformService.settings();
   const soon = new Date(now.getTime() + 8 * DAY_MS);
-  const recently = new Date(now.getTime() - (GRACE_DAYS + 2) * DAY_MS);
+  const recently = new Date(now.getTime() - (graceDays + 2) * DAY_MS);
   const subscriptions = await prisma.workspaceSubscription.findMany({
     where: { source: { in: ["TRIAL", "PAID", "GRANT"] }, planKey: { not: FREE_PLAN }, endsAt: { gt: recently, lt: soon } },
     include: { plan: true, workspace: { select: { ownerUserId: true } } },
@@ -460,7 +537,7 @@ const sendPlanReminders = async (now = new Date()) => {
       continue;
     }
 
-    const graceEndsAt = new Date(endsAt.getTime() + GRACE_DAYS * DAY_MS);
+    const graceEndsAt = new Date(endsAt.getTime() + graceDays * DAY_MS);
     const inGrace = source === "PAID" && now < graceEndsAt;
     await notificationsService.notifySafely([
       {
@@ -476,7 +553,31 @@ const sendPlanReminders = async (now = new Date()) => {
   return { checked: subscriptions.length, sent };
 };
 
+// What a workspace is using now, for its own Plan page and the admin panel.
+const usageOf = async (workspaceId: string) => {
+  const [businesses, seats, storage, tokens] = await Promise.all([
+    countBusinesses(prisma, workspaceId),
+    seatEmails(workspaceId),
+    storageBytes(workspaceId),
+    prisma.aiMessage.aggregate({
+      where: { workspaceId, createdAt: { gte: startOfTodayUtc() } },
+      _sum: { promptTokens: true, completionTokens: true },
+    }),
+  ]);
+  return {
+    businesses,
+    members: seats.size,
+    storageBytes: storage,
+    aiTokensToday: (tokens._sum.promptTokens ?? 0) + (tokens._sum.completionTokens ?? 0),
+  };
+};
+
 export const billingService = {
+  usageOf,
+  toPublicPlan,
+  toPaymentDto,
+  paymentInclude,
+  checkPrice,
   checkout,
   settle,
   getPayment,

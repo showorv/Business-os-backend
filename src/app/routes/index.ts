@@ -4,6 +4,8 @@ import { analyticsRouter } from "../modules/analytics/analytics.router.js";
 import { auditRouter, businessAuditRouter } from "../modules/audit/audit.router.js";
 import { authRouter } from "../modules/auth/auth.router.js";
 import { billingRouter } from "../modules/billing/billing.router.js";
+import { platformRouter } from "../modules/platform/platform.router.js";
+import { platformAdminRouter } from "../modules/platform-admin/platform-admin.router.js";
 import { budgetsRouter } from "../modules/budgets/budgets.router.js";
 import { businessesRouter } from "../modules/businesses/businesses.router.js";
 import { categoriesRouter } from "../modules/categories/categories.router.js";
@@ -45,6 +47,8 @@ const moduleRoutes = [
   { path: "/notifications", router: notificationsRouter },
   { path: "/ai", router: aiRouter },
   { path: "/billing", router: billingRouter },
+  { path: "/platform", router: platformRouter },
+  { path: "/admin", router: platformAdminRouter },
   { path: "/tasks", router: allTasksRouter },
   { path: "/businesses", router: businessesRouter },
   { path: "/businesses/:businessId/members", router: membersRouter },

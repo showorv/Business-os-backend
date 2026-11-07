@@ -8,23 +8,26 @@ enum MfaFactorType {
 }
 
 model User {
-  id           String     @id @default(uuid(7)) @db.Uuid
-  email        String     @unique @db.Citext
-  passwordHash String     @map("password_hash")
-  name         String
-  status       UserStatus @default(ACTIVE)
-  mfaEnabled   Boolean    @default(false) @map("mfa_enabled")
+  id              String     @id @default(uuid(7)) @db.Uuid
+  email           String     @unique @db.Citext
+  passwordHash    String     @map("password_hash")
+  name            String
+  status          UserStatus @default(ACTIVE)
+  mfaEnabled      Boolean    @default(false) @map("mfa_enabled")
+  // Runs the whole platform (plans, payments, every workspace). Set with `npm run admin:grant`.
+  isPlatformAdmin Boolean    @default(false) @map("is_platform_admin")
   // Bumped to invalidate every access token the user holds.
-  tokenVersion Int        @default(0) @map("token_version")
-  locale       String     @default("en") @db.VarChar(10)
-  digitStyle   String     @default("latin") @map("digit_style") @db.VarChar(10)
-  lastLoginAt  DateTime?  @map("last_login_at") @db.Timestamptz(3)
-  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  tokenVersion    Int        @default(0) @map("token_version")
+  locale          String     @default("en") @db.VarChar(10)
+  digitStyle      String     @default("latin") @map("digit_style") @db.VarChar(10)
+  lastLoginAt     DateTime?  @map("last_login_at") @db.Timestamptz(3)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   workspaces      UserWorkspace[]
   ownedWorkspaces Workspace[]     @relation("WorkspaceOwner")
   payments        Payment[]       @relation("PaymentCreator")
+  createdCoupons  Coupon[]        @relation("CouponCreator")
   mfaFactors      MfaFactor[]
   sessions        UserSession[]
   refreshTokens   RefreshToken[]

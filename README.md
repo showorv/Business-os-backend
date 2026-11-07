@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 and 11.2 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.3 done) |
 
 ## Run it
 
@@ -231,8 +231,8 @@ requireAuth              who are you?
 |---|---|---|
 | 11.1 | Plans and limits: trial, enforcement, Plan page, upgrade prompts | ✅ Done |
 | 11.2 | Payments through a demo gateway (success, fail, cancel), receipts, reminders, grace; SSLCommerz and bKash plug in later | ✅ Done |
-| 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ⬜ Next |
-| 11.4 | Customers and suppliers | ⬜ |
+| 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ✅ Done |
+| 11.4 | Customers and suppliers | ⬜ Next |
 | 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ⬜ |
 | 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ |
 | 11.7 | Products and stock | ⬜ |
@@ -324,6 +324,33 @@ Each one goes once per end date, so renewing brings fresh reminders and nothing 
 - month arithmetic (31 January plus one month is the end of February).
 
 All 751 tests pass.
+
+### Step 11.3: Platform admin panel
+
+The person who runs Business OS (you) now has an admin panel at `/admin` in the web app, backed by `/api/v1/admin/*`.
+
+**Who can open it.** Only someone marked as a platform admin **and** with two-step sign-in turned on. Nobody is an admin by default. On a server, run `npm run admin:grant -- you@example.com` (and `npm run admin:revoke -- you@example.com` to take it away). Without two-step sign-in the API answers `PLATFORM_ADMIN_MFA_REQUIRED`; anyone else gets `PLATFORM_ADMIN_ONLY`.
+
+**What an admin can do.**
+
+| Area | What it does |
+|---|---|
+| Overview | Monthly income, money received this month and in each of the last 12 months, accounts by plan state, people |
+| Accounts | Search and filter every workspace. Open one to see its plan, usage, businesses, payments and what admins changed |
+| Change plan | Give a plan free until a date or for good (with a private note), set a trial, or move it to Free. The owner gets an email |
+| Suspend | Nobody can open a suspended account's businesses (`WORKSPACE_SUSPENDED`), and they drop out of combined views. Nothing is deleted. Lifting it puts everything back |
+| People | Everyone with an account, with two-step status and last sign-in |
+| Plans | Change prices, limits, AI and the daily AI allowance, or add a plan. A change applies to every account on the plan at once. Free always stays at ৳0 |
+| Coupons | A percentage or an amount off, for some plans or all, with a use limit and a last day. A 100% coupon gives the plan without a payment page |
+| Payments | Every payment, with filters |
+| Settings | Trial length and plan, grace days, the AI switch (`AI_PAUSED` for everyone while off), whether anyone can sign up (`SIGNUPS_CLOSED`, except people with an invitation), and an announcement shown at the top of every page |
+| Admin history | Every change made from the panel, kept in the audit log as `platform.*` |
+
+**For customers.** A "Have a coupon?" box on the Plan page checks a code with `POST /billing/price` and shows the new price before paying; `COUPON_INVALID` says why a code can't be used (not found, switched off, expired, used up, or for another plan). The public `GET /platform/announcement` gives the message for the top of the page.
+
+**Database.** Migration `20261108120000_platform_admin`: `users.is_platform_admin`; `workspaces.suspended_at` and `suspended_reason`; coupon columns on payments (list price, discount, code); new `coupons` and `platform_settings` tables. Settings are cached for 10 seconds, so a change shows everywhere within that time.
+
+**How it was checked.** 7 new tests (`tests/platform-admin.test.ts`): only admins with two-step get in; giving Pro free, a trial and Free; suspending and lifting; plan edits; coupons from creation to a 100% coupon settling at once; settings (AI pause, closed sign-ups, the announcement); and the history. All 758 tests pass.
 
 ## What was built in Phase 8
 
@@ -1469,7 +1496,8 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) and the payments migration (11.2, still to run).
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments migration (11.2) and the admin panel migration (11.3), both still to run.
+   Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
 4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.

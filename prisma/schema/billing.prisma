@@ -70,28 +70,32 @@ enum PaymentStatus {
 // gateway's answer moves it on. The price is copied from the plan at that moment, never taken from the
 // browser. A paid one gets a receipt number and the period it paid for.
 model Payment {
-  id            String        @id @default(uuid(7)) @db.Uuid
-  workspaceId   String        @map("workspace_id") @db.Uuid
-  planKey       String        @map("plan_key") @db.VarChar(40)
-  billingCycle  BillingCycle  @map("billing_cycle")
-  amountMinor   BigInt        @map("amount_minor")
-  currency      String        @db.Char(3)
-  status        PaymentStatus @default(PENDING)
+  id              String        @id @default(uuid(7)) @db.Uuid
+  workspaceId     String        @map("workspace_id") @db.Uuid
+  planKey         String        @map("plan_key") @db.VarChar(40)
+  billingCycle    BillingCycle  @map("billing_cycle")
+  // What was charged, after any coupon. The plan's price at the time is listAmountMinor.
+  amountMinor     BigInt        @map("amount_minor")
+  listAmountMinor BigInt        @default(0) @map("list_amount_minor")
+  couponCode      String?       @map("coupon_code") @db.VarChar(40)
+  discountMinor   BigInt        @default(0) @map("discount_minor")
+  currency        String        @db.Char(3)
+  status          PaymentStatus @default(PENDING)
   // "demo" for now; "sslcommerz" and "bkash" once the merchant accounts exist.
-  gateway       String        @db.VarChar(20)
+  gateway         String        @db.VarChar(20)
   // The gateway's own transaction id, and how the person paid (bkash, nagad, card).
-  gatewayRef    String?       @map("gateway_ref") @db.VarChar(120)
-  method        String?       @db.VarChar(20)
-  receiptNumber String?       @unique @map("receipt_number") @db.VarChar(30)
-  periodStart   DateTime?     @map("period_start") @db.Timestamptz(3)
-  periodEnd     DateTime?     @map("period_end") @db.Timestamptz(3)
-  failureReason String?       @map("failure_reason")
-  createdBy     String        @map("created_by") @db.Uuid
+  gatewayRef      String?       @map("gateway_ref") @db.VarChar(120)
+  method          String?       @db.VarChar(20)
+  receiptNumber   String?       @unique @map("receipt_number") @db.VarChar(30)
+  periodStart     DateTime?     @map("period_start") @db.Timestamptz(3)
+  periodEnd       DateTime?     @map("period_end") @db.Timestamptz(3)
+  failureReason   String?       @map("failure_reason")
+  createdBy       String        @map("created_by") @db.Uuid
   // A checkout left open longer than this can no longer be paid; a new one is started instead.
-  expiresAt     DateTime      @map("expires_at") @db.Timestamptz(3)
-  paidAt        DateTime?     @map("paid_at") @db.Timestamptz(3)
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  expiresAt       DateTime      @map("expires_at") @db.Timestamptz(3)
+  paidAt          DateTime?     @map("paid_at") @db.Timestamptz(3)
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   plan      Plan      @relation(fields: [planKey], references: [key])
@@ -99,4 +103,38 @@ model Payment {
 
   @@index([workspaceId, createdAt])
   @@map("payments")
+}
+
+// A discount code made in the admin panel: a percentage or a fixed amount off, for some or all plans.
+model Coupon {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  code           String    @unique @db.Citext
+  description    String?
+  // Exactly one of these is set.
+  percentOff     Int?      @map("percent_off")
+  amountOffMinor BigInt?   @map("amount_off_minor")
+  // Empty: every plan.
+  planKeys       String[]  @default([]) @map("plan_keys")
+  maxRedemptions Int?      @map("max_redemptions")
+  redemptions    Int       @default(0)
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(3)
+  active         Boolean   @default(true)
+  createdBy      String?   @map("created_by") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  creator User? @relation("CouponCreator", fields: [createdBy], references: [id], onDelete: SetNull)
+
+  @@map("coupons")
+}
+
+// Platform-wide settings the admin panel changes: trial length, grace days, the AI switch, sign-ups and
+// the announcement. One row per key; missing keys use the defaults in the code.
+model PlatformSetting {
+  key       String   @id @db.VarChar(60)
+  value     Json
+  updatedBy String?  @map("updated_by") @db.Uuid
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("platform_settings")
 }

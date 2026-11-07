@@ -16,6 +16,7 @@ export const publicUser = z.object({
   name: z.string(),
   status: z.enum(["ACTIVE", "DISABLED"]),
   mfaEnabled: z.boolean(),
+  isPlatformAdmin: z.boolean(),
   locale: z.string(),
   digitStyle: z.string(),
   lastLoginAt: z.string().nullable(),

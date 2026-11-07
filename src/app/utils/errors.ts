@@ -129,6 +129,17 @@ export const ErrorCode = {
   PAYMENT_EXPIRED: "PAYMENT_EXPIRED",
   // The demo payment page is switched off (in production, or another gateway is in use).
   PAYMENT_GATEWAY_UNAVAILABLE: "PAYMENT_GATEWAY_UNAVAILABLE",
+  // A coupon that doesn't exist, has ended, is used up or isn't for this plan. params.reason says which.
+  COUPON_INVALID: "COUPON_INVALID",
+  // The platform admin panel: only for platform admins, and only with two-step verification on.
+  PLATFORM_ADMIN_ONLY: "PLATFORM_ADMIN_ONLY",
+  PLATFORM_ADMIN_MFA_REQUIRED: "PLATFORM_ADMIN_MFA_REQUIRED",
+  // The platform admin suspended this account, so its businesses can't be opened. Nothing was deleted.
+  WORKSPACE_SUSPENDED: "WORKSPACE_SUSPENDED",
+  // The platform admin switched the AI assistant off for everyone for now.
+  AI_PAUSED: "AI_PAUSED",
+  // The platform admin closed new sign-ups (someone with an invitation can still join).
+  SIGNUPS_CLOSED: "SIGNUPS_CLOSED",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

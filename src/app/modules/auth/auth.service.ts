@@ -17,6 +17,7 @@ import {
 import { assertNotLocked, clearFailures, recordFailure } from "../../utils/lockout.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
+import { platformService } from "../platform/platform.service.js";
 import { NotificationType } from "../notifications/notifications.interface.js";
 import { notificationsService } from "../notifications/notifications.service.js";
 import { usersService } from "../users/users.service.js";
@@ -101,6 +102,13 @@ const revokeSessions = async (tx: Prisma.TransactionClient, where: { userId: str
 
 const register = async (body: IRegisterBody, context: RequestContext) => {
   if (!env.REGISTRATION_ENABLED) throw new AppError(403, ErrorCode.REGISTRATION_DISABLED);
+  // Closed from the admin panel: only someone already invited can still join.
+  if (!(await platformService.settings()).signupsEnabled) {
+    const invited = await prisma.invitation.count({
+      where: { email: body.email, acceptedAt: null, revokedAt: null, expiresAt: { gt: new Date() } },
+    });
+    if (invited === 0) throw new AppError(403, ErrorCode.SIGNUPS_CLOSED);
+  }
 
   const passwordHash = await bcrypt.hash(body.password, env.BCRYPT_COST);
 

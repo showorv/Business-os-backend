@@ -9,6 +9,7 @@ import { pageArgs, toPage } from "../../utils/pagination.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import { billingService } from "../billing/billing.service.js";
+import { platformService } from "../platform/platform.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
 import { membersService } from "../members/members.service.js";
 import { tasksService } from "../tasks/tasks.service.js";
@@ -50,9 +51,11 @@ const status = async (auth: AuthContext) => {
     membersService.listBusinessesWithPermission(auth.userId, Permission.AI_USE, false),
   ]);
   const workspaces = await prisma.business.findMany({ where: { id: { in: businesses.map((business) => business.id) } }, select: { workspaceId: true } });
-  const { allowed, limit } = await aiAllowance(workspaces.map((business) => business.workspaceId));
+  const [{ allowed, limit }, { aiEnabled }] = await Promise.all([aiAllowance(workspaces.map((business) => business.workspaceId)), platformService.settings()]);
   return {
     configured: aiConfigured(),
+    // Switched off for everyone by the platform admin, for now.
+    paused: !aiEnabled,
     model: aiConfigured() ? env.AI_CHAT_MODEL : null,
     // False when none of the person's businesses is on a plan with the assistant.
     planAllowsAi: allowed.size > 0,
@@ -90,6 +93,7 @@ const toAppError = (error: unknown) => {
 
 const chat = async (auth: AuthContext, body: IChatBody) => {
   if (!aiConfigured()) throw new AppError(503, ErrorCode.AI_NOT_CONFIGURED);
+  if (!(await platformService.settings()).aiEnabled) throw new AppError(503, ErrorCode.AI_PAUSED);
 
   const { businesses, dailyTokenLimit } = await resolveBusinesses(auth, body.businessId);
   const used = await tokensUsedToday(auth.workspaceId);

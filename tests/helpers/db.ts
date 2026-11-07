@@ -60,6 +60,8 @@ export const resetDatabase = () =>
     prisma.$executeRawUnsafe(`DELETE FROM business_members`),
     prisma.$executeRawUnsafe(`DELETE FROM businesses`),
     prisma.$executeRawUnsafe(`DELETE FROM payments`),
+    prisma.$executeRawUnsafe(`DELETE FROM coupons`),
+    prisma.$executeRawUnsafe(`DELETE FROM platform_settings`),
     prisma.$executeRawUnsafe(`DELETE FROM users`),
     prisma.$executeRawUnsafe(`DELETE FROM workspaces`),
   ]);

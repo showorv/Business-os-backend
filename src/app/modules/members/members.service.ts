@@ -23,7 +23,7 @@ const resolveContext = async (userId: string, businessId: string): Promise<Busin
   const member = await prisma.businessMember.findUnique({
     where: { businessId_userId: { businessId, userId } },
     include: {
-      business: { select: { status: true, baseCurrency: true, timezone: true, fiscalYearStartMonth: true } },
+      business: { select: { status: true, baseCurrency: true, timezone: true, fiscalYearStartMonth: true, workspace: { select: { suspendedAt: true } } } },
       role: { select: { key: true, permissions: { select: { permissionKey: true } } } },
     },
   });
@@ -41,6 +41,7 @@ const resolveContext = async (userId: string, businessId: string): Promise<Busin
     roleKey: member.role.key as RoleKey,
     permissions: [...new Set([...member.role.permissions.map((item) => item.permissionKey), ...member.extraPermissions])],
     planLocked: (await billingService.lockedBusinessIds(member.workspaceId)).has(businessId),
+    workspaceSuspended: member.business.workspace.suspendedAt !== null,
   };
   await cacheContext(context);
   return context;
@@ -59,7 +60,8 @@ const listBusinessesWithPermission = async (userId: string, permission: string, 
     where: {
       userId,
       status: "ACTIVE",
-      ...(includeArchived ? {} : { business: { status: { not: "ARCHIVED" } } }),
+      // A suspended workspace's businesses are left out of every combined view.
+      business: { workspace: { suspendedAt: null }, ...(includeArchived ? {} : { status: { not: "ARCHIVED" as const } }) },
     },
     select: {
       extraPermissions: true,

@@ -47,6 +47,9 @@ export const payment = z.object({
   planNameBn: z.string().nullable(),
   billingCycle: z.enum(["MONTHLY", "YEARLY"]),
   amountMinor: z.string(),
+  listAmountMinor: z.string(),
+  discountMinor: z.string(),
+  couponCode: z.string().nullable(),
   currency: z.string(),
   status: z.enum(["PENDING", "PAID", "FAILED", "CANCELLED"]),
   gateway: z.string(),
@@ -69,6 +72,13 @@ addPath("Billing", {
   body: billingValidation.checkout,
   status: 201,
   response: z.object({ paymentId: z.uuid(), redirectUrl: z.string(), amountMinor: z.string(), currency: z.string() }),
+});
+addPath("Billing", {
+  method: "post",
+  path: "/billing/price",
+  summary: "What a plan costs with a coupon, before paying. COUPON_INVALID says why a code can't be used",
+  body: billingValidation.priceCheck,
+  response: z.object({ planKey: z.string(), billingCycle: z.enum(["MONTHLY", "YEARLY"]), currency: z.string(), listAmountMinor: z.string(), discountMinor: z.string(), amountMinor: z.string(), couponCode: z.string().nullable() }),
 });
 addPath("Billing", { method: "get", path: "/billing/payments", summary: "My workspace's payments, newest first (unfinished checkouts left out)", response: z.array(payment) });
 addPath("Billing", { method: "get", path: "/billing/payments/{paymentId}", summary: "One payment, with what the receipt needs", params: billingValidation.paymentParams, response: payment });

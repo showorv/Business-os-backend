@@ -5,7 +5,11 @@ const plansQuery = z.object({});
 const checkout = z.object({
   planKey: z.string().trim().min(1).max(40),
   billingCycle: z.enum(["MONTHLY", "YEARLY"]),
+  couponCode: z.string().trim().min(1).max(40).optional(),
 });
+
+// What a plan would cost with a coupon, before paying.
+const priceCheck = checkout.required({ couponCode: true });
 
 const paymentParams = z.object({ paymentId: z.uuid() });
 
@@ -15,4 +19,4 @@ const demoOutcome = z.object({
   method: z.enum(["bkash", "nagad", "card"]).optional(),
 });
 
-export const billingValidation = { plansQuery, checkout, paymentParams, demoOutcome };
+export const billingValidation = { plansQuery, checkout, priceCheck, paymentParams, demoOutcome };
