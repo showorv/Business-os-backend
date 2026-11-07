@@ -55,13 +55,13 @@ model LedgerAccount {
   createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  business         Business          @relation(fields: [businessId], references: [id])
-  parent           LedgerAccount?    @relation("LedgerAccountTree", fields: [parentId], references: [id])
-  children         LedgerAccount[]   @relation("LedgerAccountTree")
+  business         Business              @relation(fields: [businessId], references: [id])
+  parent           LedgerAccount?        @relation("LedgerAccountTree", fields: [parentId], references: [id])
+  children         LedgerAccount[]       @relation("LedgerAccountTree")
   financialAccount FinancialAccount?
   categories       Category[]
   lines            JournalLine[]
-    monthlyRollups   LedgerMonthlyRollup[]
+  monthlyRollups   LedgerMonthlyRollup[]
 
   @@unique([businessId, code])
   @@map("ledger_accounts")
@@ -112,11 +112,11 @@ model JournalEntry {
   reversedBy   JournalEntry? @relation("JournalReversal")
   lines        JournalLine[]
 
-  postedTransaction   Transaction?    @relation("TransactionJournal")
-  reversedTransaction Transaction?    @relation("TransactionReversalJournal")
+  postedTransaction   Transaction?          @relation("TransactionJournal")
+  reversedTransaction Transaction?          @relation("TransactionReversalJournal")
   reconciliation      Reconciliation?
-    transferOut         IntercompanyTransfer? @relation("IntercompanyFromEntry")
-    transferIn          IntercompanyTransfer? @relation("IntercompanyToEntry")
+  transferOut         IntercompanyTransfer? @relation("IntercompanyFromEntry")
+  transferIn          IntercompanyTransfer? @relation("IntercompanyToEntry")
 
   @@unique([businessId, entryNo])
   @@index([businessId, entryDate(sort: Desc), id(sort: Desc)])

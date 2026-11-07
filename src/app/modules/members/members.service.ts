@@ -13,6 +13,7 @@ import { auditService } from "../audit/audit.service.js";
 import { rolesService } from "../roles/roles.service.js";
 import { usersService } from "../users/users.service.js";
 import type { BusinessContext, IAddMemberInput, IUpdateMemberBody } from "./members.interface.js";
+import { billingService } from "../billing/billing.service.js";
 
 // Runs before any business context exists, so it uses the normal connection rather than withRls.
 const resolveContext = async (userId: string, businessId: string): Promise<BusinessContext | null> => {
@@ -39,6 +40,7 @@ const resolveContext = async (userId: string, businessId: string): Promise<Busin
     memberId: member.id,
     roleKey: member.role.key as RoleKey,
     permissions: [...new Set([...member.role.permissions.map((item) => item.permissionKey), ...member.extraPermissions])],
+    planLocked: (await billingService.lockedBusinessIds(member.workspaceId)).has(businessId),
   };
   await cacheContext(context);
   return context;

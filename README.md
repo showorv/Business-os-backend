@@ -14,8 +14,9 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | 6 | Tasks & reminders (email, notifications) | ✅ Done |
 | 7 | Integrations (statement import, matching) | ✅ Done |
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
-| 9 | Frontend | ⬜ Next |
+| 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 done) |
 
 ## Run it
 
@@ -221,6 +222,61 @@ requireAuth              who are you?
 **New permission:** add it to `src/app/constants/permissions.ts` and to a new migration. A test fails if the two disagree.
 
 **New error:** add a code to `src/app/utils/errors.ts`.
+
+## What was built in Phase 11 (SaaS)
+
+**The goal:** turn Business OS into a product other businesses pay for. Free gives one business without the AI; Pro gives several businesses, a bigger team, more storage and the AI, paid monthly or yearly. You (the platform admin) can give Pro free to anyone and change prices and limits from an admin panel.
+
+| Step | What it covers | Status |
+|---|---|---|
+| 11.1 | Plans and limits: trial, enforcement, Plan page, upgrade prompts | ✅ Done |
+| 11.2 | Payments through a demo gateway (success, fail, cancel), receipts, reminders, grace; SSLCommerz and bKash plug in later | ⬜ Next |
+| 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ⬜ |
+| 11.4 | Customers and suppliers | ⬜ |
+| 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ⬜ |
+| 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ |
+| 11.7 | Products and stock | ⬜ |
+| 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ |
+
+### Step 11.1: Plans and limits
+
+**Who has a plan.** The plan belongs to a *workspace*, and each person who signs up owns one. Businesses live in a workspace, so a plan covers all the businesses its owner made. Someone invited into another person's business uses that business's plan, not their own.
+
+**The two plans** (stored in the new `plans` table, so the admin panel can change them later without code):
+
+| | Free | Pro |
+|---|---|---|
+| Price | ৳0 | ৳599 a month or ৳5,990 a year |
+| Businesses | 1 | 5 |
+| People (across all its businesses) | 3 | 15 |
+| Document storage | 500 MB | 10 GB |
+| AI assistant | No | Yes, up to 100,000 tokens a day |
+
+**What happens over time.**
+- **Sign up:** 14 days of Pro free (a trial). No card needed.
+- **Trial ends:** you move to Free. Nothing is deleted.
+- **A paid plan ends:** it keeps working for 7 more days (grace), then moves to Free.
+- **Given free by the admin:** Pro until the date the admin chose, or with no end date.
+
+**What the limits do.**
+- **A new business, a restored business, an invitation or an upload** that would go over the plan is refused with `403 PLAN_LIMIT`, and the error says which limit and the number (`{limit: "businesses", max: 1, plan: "free"}`).
+- **More businesses than the plan allows** (after a trial or plan ends): the oldest ones keep working; the newer ones can still be read, but anything that changes them is refused with `PLAN_BUSINESS_LOCKED`. Archiving is still allowed, and archived businesses don't count. Upgrading unlocks everything.
+- **People** are counted once each, by email, across all the workspace's businesses, including invitations not yet accepted.
+- **The AI** only answers about businesses whose plan includes it (`PLAN_FEATURE_REQUIRED` otherwise). The daily token limit comes from the plan, and never goes above `AI_DAILY_TOKEN_LIMIT` in `.env`.
+
+**New endpoints.**
+- `GET /billing/plans`: the public plans and prices (no sign-in needed, for the pricing page).
+- `GET /billing/me`: your plan, its state (`free`, `trial`, `active`, `grace`, `expired`, `granted`), its end date, whether you own the account, and what you use (businesses, people, storage, AI today).
+- `GET /businesses/:id` now includes `plan: {key, name, state, aiEnabled, locked}`.
+- `GET /ai/status` now includes `planAllowsAi`.
+
+**Database change** (migration `20261107120000_plans_subscriptions`):
+- new tables `plans` and `workspace_subscriptions`
+- `workspaces.owner_user_id`, filled in from each person's own workspace
+- the Free and Pro plans, in English and Bangla
+- **every workspace that already exists gets Pro free with no end date** ("Existing account before plans"), so nobody who used the app before loses anything. You can change that from the admin panel in 11.3.
+
+**How it was checked.** 8 new tests (`tests/billing.test.ts`): public plans; the trial on sign-up; an invited person sees their own plan; a trial ending (third business refused, the newer business locked, archive allowed, restore refused, a grant unlocks it); the 7-day grace; people counted once; storage; AI refused on Free. All 744 tests pass.
 
 ## What was built in Phase 8
 
@@ -1366,7 +1422,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration; after it, every existing account is on Pro free with no end date.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
 4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.

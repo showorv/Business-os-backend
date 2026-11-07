@@ -8,6 +8,7 @@ import type { RequestContext } from "../../utils/requestContext.js";
 import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
+import { billingService } from "../billing/billing.service.js";
 import { categoriesService } from "../categories/categories.service.js";
 import { fiscalPeriodsService, fiscalYearOf } from "../fiscal-periods/fiscal-periods.service.js";
 import { journalsService } from "../journals/journals.service.js";
@@ -66,6 +67,7 @@ const provision = async (
 // It uses the normal connection because the new id cannot be in an RLS scope before it exists.
 const create = (auth: AuthContext, body: ICreateBusinessBody, context: RequestContext) =>
   prisma.$transaction(async (tx) => {
+    await billingService.assertCanAddBusiness(tx, auth.workspaceId);
     const business = await tx.business.create({
       data: {
         ...body,
@@ -115,7 +117,8 @@ const getOne = async (business: BusinessContext) => {
   const row = await withBusinessScope(business, (tx) =>
     tx.business.findUniqueOrThrow({ where: { id: business.businessId } }),
   );
-  return { ...row, membership: { roleKey: business.roleKey, permissions: business.permissions } };
+  const plan = await billingService.forBusiness(business.workspaceId, business.businessId);
+  return { ...row, membership: { roleKey: business.roleKey, permissions: business.permissions }, plan };
 };
 
 const changedFields = (before: Record<string, unknown>, after: Record<string, unknown>, keys: string[]) => {
@@ -172,6 +175,10 @@ const changeStatus = async (business: BusinessContext, status: BusinessStatus, c
   if (!ALLOWED_TRANSITIONS[business.businessStatus].includes(status)) {
     throw new AppError(409, ErrorCode.INVALID_STATUS_CHANGE, { from: business.businessStatus, to: status });
   }
+  // Bringing back an archived business counts against the plan like a new one.
+  if (business.businessStatus === "ARCHIVED") {
+    await prisma.$transaction((tx) => billingService.assertCanAddBusiness(tx, business.workspaceId));
+  }
 
   const updated = await withBusinessScope(business, async (tx) => {
     const result = await tx.business.update({ where: { id: business.businessId }, data: { status } });
@@ -186,7 +193,8 @@ const changeStatus = async (business: BusinessContext, status: BusinessStatus, c
     return result;
   });
 
-  await invalidateBusinessContext(business.businessId);
+  // Archiving or restoring one business can lock or unlock the others on the plan.
+  await billingService.invalidateWorkspaceContexts(business.workspaceId);
   return updated;
 };
 

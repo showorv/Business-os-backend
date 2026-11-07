@@ -111,6 +111,12 @@ export const ErrorCode = {
   AI_BUDGET_EXCEEDED: "AI_BUDGET_EXCEEDED",
   AI_NO_BUSINESS_ACCESS: "AI_NO_BUSINESS_ACCESS",
   AI_PROPOSAL_NOT_PENDING: "AI_PROPOSAL_NOT_PENDING",
+  // The workspace's plan doesn't allow this: params say which limit, the most allowed and the plan.
+  PLAN_LIMIT: "PLAN_LIMIT",
+  // A feature the plan doesn't include, such as the AI assistant.
+  PLAN_FEATURE_REQUIRED: "PLAN_FEATURE_REQUIRED",
+  // A business beyond the plan's limit after it lapsed: readable, but nothing in it can change.
+  PLAN_BUSINESS_LOCKED: "PLAN_BUSINESS_LOCKED",
 } as const;
 
 export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

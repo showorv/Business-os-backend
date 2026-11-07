@@ -4,6 +4,7 @@ import { AppError, ErrorCode } from "../../utils/errors.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import type { ICreateUserInput, IPublicUser, IUpdateMeBody } from "./users.interface.js";
+import { billingService } from "../billing/billing.service.js";
 
 const publicFields = {
   id: true,
@@ -35,6 +36,8 @@ const createWithWorkspace = async (tx: Prisma.TransactionClient, input: ICreateU
   const user = await tx.user.create({
     data: { ...input, workspaces: { create: { workspaceId: workspace.id, isDefault: true } } },
   });
+  await tx.workspace.update({ where: { id: workspace.id }, data: { ownerUserId: user.id } });
+  await billingService.startTrial(tx, workspace.id);
   return { user, workspaceId: workspace.id };
 };
 

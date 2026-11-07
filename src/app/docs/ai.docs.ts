@@ -51,7 +51,7 @@ const answer = z.object({
 const page = (item: z.ZodType) => z.object({ items: z.array(item), nextCursor: z.string().nullable() });
 const documents = "/businesses/{businessId}/documents";
 
-addPath("AI", { method: "get", path: "/ai/status", summary: "Whether the assistant is switched on, and today's token use", response: z.object({ configured: z.boolean(), model: z.string().nullable(), tokensUsedToday: z.number(), dailyTokenLimit: z.number() }) });
+addPath("AI", { method: "get", path: "/ai/status", summary: "Whether the assistant is switched on, and today's token use", response: z.object({ configured: z.boolean(), model: z.string().nullable(), planAllowsAi: z.boolean(), tokensUsedToday: z.number(), dailyTokenLimit: z.number() }) });
 addPath("AI", { method: "post", path: "/ai/chat", summary: "Ask a question, in English or Bangla. Needs ai.use, and each tool checks its own permission", body: aiValidation.chat, response: answer });
 addPath("AI", { method: "get", path: "/ai/conversations", summary: "Your conversations", query: aiValidation.listQuery, response: page(z.object({ id: z.uuid(), title: z.string(), createdAt: z.string() })) });
 addPath("AI", { method: "get", path: "/ai/conversations/{conversationId}", summary: "One conversation with its messages and sources", params: aiValidation.conversationParams, response: z.object({ id: z.uuid(), title: z.string(), createdAt: z.string(), messages: z.array(message) }) });

@@ -8,6 +8,7 @@ import { AppError, ErrorCode } from "../../utils/errors.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
+import { billingService } from "../billing/billing.service.js";
 import type { AuthContext } from "../auth/auth.interface.js";
 import { membersService } from "../members/members.service.js";
 import { tasksService } from "../tasks/tasks.service.js";
@@ -32,13 +33,31 @@ const tokensUsedToday = async (workspaceId: string) => {
   return (_sum.promptTokens ?? 0) + (_sum.completionTokens ?? 0);
 };
 
+// The plans of the workspaces these businesses belong to, and the day's limit: the most generous of
+// those that include the assistant.
+const aiAllowance = async (workspaceIds: string[]) => {
+  const plans = await billingService.aiPlans(workspaceIds);
+  const allowed = new Set([...plans].filter(([, plan]) => plan.aiEnabled).map(([workspaceId]) => workspaceId));
+  // AI_DAILY_TOKEN_LIMIT stays as the server's own ceiling, whatever a plan says.
+  const fromPlans = Math.max(0, ...[...plans.values()].filter((plan) => plan.aiEnabled).map((plan) => plan.aiDailyTokens));
+  const limit = Math.min(fromPlans, env.AI_DAILY_TOKEN_LIMIT);
+  return { allowed, limit };
+};
+
 const status = async (auth: AuthContext) => {
-  const used = await tokensUsedToday(auth.workspaceId);
+  const [used, businesses] = await Promise.all([
+    tokensUsedToday(auth.workspaceId),
+    membersService.listBusinessesWithPermission(auth.userId, Permission.AI_USE, false),
+  ]);
+  const workspaces = await prisma.business.findMany({ where: { id: { in: businesses.map((business) => business.id) } }, select: { workspaceId: true } });
+  const { allowed, limit } = await aiAllowance(workspaces.map((business) => business.workspaceId));
   return {
     configured: aiConfigured(),
     model: aiConfigured() ? env.AI_CHAT_MODEL : null,
+    // False when none of the person's businesses is on a plan with the assistant.
+    planAllowsAi: allowed.size > 0,
     tokensUsedToday: used,
-    dailyTokenLimit: env.AI_DAILY_TOKEN_LIMIT,
+    dailyTokenLimit: limit,
   };
 };
 
@@ -50,10 +69,16 @@ const resolveBusinesses = async (auth: AuthContext, businessId: string | undefin
   if (chosen.length === 0) throw new AppError(403, ErrorCode.AI_NO_BUSINESS_ACCESS);
 
   const contexts = await Promise.all(chosen.map((business) => membersService.resolveContext(auth.userId, business.id)));
-  return chosen.flatMap((business, index) => {
+  const found = chosen.flatMap((business, index) => {
     const context = contexts[index];
     return context ? [{ business: context, name: business.name }] : [];
   });
+
+  // Only businesses whose plan includes the assistant. Asked about one that doesn't, say so.
+  const allowance = await aiAllowance(found.map(({ business }) => business.workspaceId));
+  const onPlan = found.filter(({ business }) => allowance.allowed.has(business.workspaceId));
+  if (onPlan.length === 0) throw new AppError(403, ErrorCode.PLAN_FEATURE_REQUIRED, { feature: "ai" });
+  return { businesses: onPlan, dailyTokenLimit: allowance.limit };
 };
 
 const toAppError = (error: unknown) => {
@@ -66,12 +91,12 @@ const toAppError = (error: unknown) => {
 const chat = async (auth: AuthContext, body: IChatBody) => {
   if (!aiConfigured()) throw new AppError(503, ErrorCode.AI_NOT_CONFIGURED);
 
+  const { businesses, dailyTokenLimit } = await resolveBusinesses(auth, body.businessId);
   const used = await tokensUsedToday(auth.workspaceId);
-  if (used >= env.AI_DAILY_TOKEN_LIMIT) {
-    throw new AppError(429, ErrorCode.AI_BUDGET_EXCEEDED, { used, limit: env.AI_DAILY_TOKEN_LIMIT });
+  if (used >= dailyTokenLimit) {
+    throw new AppError(429, ErrorCode.AI_BUDGET_EXCEEDED, { used, limit: dailyTokenLimit });
   }
 
-  const businesses = await resolveBusinesses(auth, body.businessId);
   const user = await usersService.getMe(auth.userId);
 
   const { conversation, history } = await withRls(ownScope(auth), async (tx) => {
@@ -227,6 +252,7 @@ const confirmProposal = async (auth: AuthContext, proposalId: string, body: ICon
   const business = await membersService.resolveContext(auth.userId, found.businessId);
   if (!business) throw new AppError(404, ErrorCode.NOT_FOUND);
   if (business.businessStatus !== "ACTIVE") throw new AppError(409, ErrorCode.BUSINESS_NOT_ACTIVE, { status: business.businessStatus });
+  if (business.planLocked) throw new AppError(403, ErrorCode.PLAN_BUSINESS_LOCKED);
   if (!business.permissions.includes(ACTIVE_PERMISSION[found.kind])) {
     throw new AppError(403, ErrorCode.PERMISSION_DENIED, { permission: ACTIVE_PERMISSION[found.kind] });
   }

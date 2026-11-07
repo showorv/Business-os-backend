@@ -41,29 +41,29 @@ model Business {
   members     BusinessMember[]
   invitations Invitation[]
 
-  financialAccounts FinancialAccount[]
-  categories        Category[]
-  transactions      Transaction[]
-  documents         Document[]
-  sequences         BusinessSequence[]
-  ledgerAccounts    LedgerAccount[]
-  fiscalPeriods     FiscalPeriod[]
-  journalEntries    JournalEntry[]
-  reconciliations   Reconciliation[]
-    monthlyRollups    LedgerMonthlyRollup[]
-  tasks              Task[]
-  reminders          Reminder[]
-  recurringSchedules RecurringSchedule[]
+  financialAccounts      FinancialAccount[]
+  categories             Category[]
+  transactions           Transaction[]
+  documents              Document[]
+  sequences              BusinessSequence[]
+  ledgerAccounts         LedgerAccount[]
+  fiscalPeriods          FiscalPeriod[]
+  journalEntries         JournalEntry[]
+  reconciliations        Reconciliation[]
+  monthlyRollups         LedgerMonthlyRollup[]
+  tasks                  Task[]
+  reminders              Reminder[]
+  recurringSchedules     RecurringSchedule[]
   integrationConnections IntegrationConnection[]
   statementTemplates     StatementTemplate[]
   statementImports       StatementImport[]
   statementRules         StatementRule[]
-  aiProposals AiProposal[]
-    budgets           Budget[]
-    goals             Goal[]
-    reportExports     ReportExport[]
-    transfersOut      IntercompanyTransfer[] @relation("IntercompanyFrom")
-    transfersIn       IntercompanyTransfer[] @relation("IntercompanyTo")
+  aiProposals            AiProposal[]
+  budgets                Budget[]
+  goals                  Goal[]
+  reportExports          ReportExport[]
+  transfersOut           IntercompanyTransfer[]  @relation("IntercompanyFrom")
+  transfersIn            IntercompanyTransfer[]  @relation("IntercompanyTo")
 
   @@index([workspaceId])
   @@map("businesses")

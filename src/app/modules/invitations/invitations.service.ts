@@ -12,6 +12,7 @@ import { membersService } from "../members/members.service.js";
 import { rolesService } from "../roles/roles.service.js";
 import { usersService } from "../users/users.service.js";
 import type { ICreateInvitationBody } from "./invitations.interface.js";
+import { billingService } from "../billing/billing.service.js";
 
 const EXPIRY_DAYS = 7;
 
@@ -19,6 +20,7 @@ const EXPIRY_DAYS = 7;
 // by hand. The email carries it encrypted through the outbox, so it is never readable in the database.
 const create = async (business: BusinessContext, body: ICreateInvitationBody, context: RequestContext) => {
   const token = randomToken();
+  await billingService.assertCanAddMember(business.workspaceId, body.email);
 
   const invitation = await withBusinessScope(business, async (tx) => {
     if (await membersService.isActiveMemberByEmail(tx, business.businessId, body.email)) {

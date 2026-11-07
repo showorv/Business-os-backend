@@ -2,6 +2,7 @@ import { z } from "zod";
 import { businessesValidation } from "../modules/businesses/businesses.validation.js";
 import { invitationsValidation } from "../modules/invitations/invitations.validation.js";
 import { membersValidation } from "../modules/members/members.validation.js";
+import { planState } from "./billing.docs.js";
 import { addPath } from "./registry.js";
 
 const businessParams = z.object({ businessId: z.uuid() });
@@ -33,7 +34,11 @@ const member = z.object({
 
 addPath("Businesses", { method: "post", path: "/businesses", summary: "Create a business. The caller becomes its owner", body: businessesValidation.create, response: business, status: 201 });
 addPath("Businesses", { method: "get", path: "/businesses", summary: "List my businesses, for the switcher", query: businessesValidation.listQuery, response: z.array(business.extend({ roleKey: z.string() })) });
-addPath("Businesses", { method: "get", path: "/businesses/{businessId}", summary: "Get a business with my role and permissions", params: businessParams, response: business.extend({ membership: z.object({ roleKey: z.string(), permissions: z.array(z.string()) }) }) });
+addPath("Businesses", { method: "get", path: "/businesses/{businessId}", summary: "Get a business with my role and permissions", params: businessParams, response: business.extend({
+  membership: z.object({ roleKey: z.string(), permissions: z.array(z.string()) }),
+  // The plan of the workspace that owns this business. locked: beyond the plan's limit, so read-only.
+  plan: z.object({ key: z.string(), name: z.string(), state: planState, aiEnabled: z.boolean(), locked: z.boolean() }),
+}) });
 addPath("Businesses", { method: "patch", path: "/businesses/{businessId}", summary: "Edit details and settings. Needs business.manage", params: businessParams, body: businessesValidation.update, response: business });
 addPath("Businesses", { method: "post", path: "/businesses/{businessId}/status", summary: "Deactivate, archive or reactivate. Needs business.manage", params: businessParams, body: businessesValidation.changeStatus, response: business });
 

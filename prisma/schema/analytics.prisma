@@ -1,198 +1,198 @@
 enum BudgetStatus {
-    ACTIVE
-    ARCHIVED
+  ACTIVE
+  ARCHIVED
 }
 
 enum GoalMetric {
-    REVENUE
-    NET_PROFIT
-    CASH_BALANCE
+  REVENUE
+  NET_PROFIT
+  CASH_BALANCE
 }
 
 enum GoalStatus {
-    ACTIVE
-    ACHIEVED
-    CANCELLED
+  ACTIVE
+  ACHIEVED
+  CANCELLED
 }
 
 enum ReportExportStatus {
-    QUEUED
-    RUNNING
-    READY
-    FAILED
+  QUEUED
+  RUNNING
+  READY
+  FAILED
 }
 
 // One row per account per month, kept up to date by a database trigger on journal_lines, so it can
 // never fall behind the ledger. Closing entries are left out, so revenue and expense months keep
 // their figures after a year-end close. Dashboards read this; formal reports read the journals.
 model LedgerMonthlyRollup {
-    workspaceId     String   @map("workspace_id") @db.Uuid
-    businessId      String   @map("business_id") @db.Uuid
-    ledgerAccountId String   @map("ledger_account_id") @db.Uuid
-    month           DateTime @db.Date
-    debitMinor      BigInt   @map("debit_minor")
-    creditMinor     BigInt   @map("credit_minor")
+  workspaceId     String   @map("workspace_id") @db.Uuid
+  businessId      String   @map("business_id") @db.Uuid
+  ledgerAccountId String   @map("ledger_account_id") @db.Uuid
+  month           DateTime @db.Date
+  debitMinor      BigInt   @map("debit_minor")
+  creditMinor     BigInt   @map("credit_minor")
 
-    business      Business      @relation(fields: [businessId], references: [id])
-    ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id])
+  business      Business      @relation(fields: [businessId], references: [id])
+  ledgerAccount LedgerAccount @relation(fields: [ledgerAccountId], references: [id])
 
-    @@id([ledgerAccountId, month])
-    @@index([businessId, month])
-    @@map("ledger_monthly_rollups")
+  @@id([ledgerAccountId, month])
+  @@index([businessId, month])
+  @@map("ledger_monthly_rollups")
 }
 
 model Budget {
-    id          String       @id @default(uuid(7)) @db.Uuid
-    workspaceId String       @map("workspace_id") @db.Uuid
-    businessId  String       @map("business_id") @db.Uuid
-    name        String
-    startMonth  DateTime     @map("start_month") @db.Date
-    endMonth    DateTime     @map("end_month") @db.Date
-    status      BudgetStatus @default(ACTIVE)
-    createdBy   String       @map("created_by") @db.Uuid
-    createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String       @id @default(uuid(7)) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  businessId  String       @map("business_id") @db.Uuid
+  name        String
+  startMonth  DateTime     @map("start_month") @db.Date
+  endMonth    DateTime     @map("end_month") @db.Date
+  status      BudgetStatus @default(ACTIVE)
+  createdBy   String       @map("created_by") @db.Uuid
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-    business Business     @relation(fields: [businessId], references: [id])
-    lines    BudgetLine[]
+  business Business     @relation(fields: [businessId], references: [id])
+  lines    BudgetLine[]
 
-    @@index([businessId, status])
-    @@map("budgets")
+  @@index([businessId, status])
+  @@map("budgets")
 }
 
 model BudgetLine {
-    id          String   @id @default(uuid(7)) @db.Uuid
-    workspaceId String   @map("workspace_id") @db.Uuid
-    businessId  String   @map("business_id") @db.Uuid
-    budgetId    String   @map("budget_id") @db.Uuid
-    categoryId  String   @map("category_id") @db.Uuid
-    amountMinor BigInt   @map("amount_minor")
-    // An alert fires at this percentage, and again at 100%.
-    alertPercent Int     @default(80) @map("alert_percent") @db.SmallInt
-    createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  budgetId     String   @map("budget_id") @db.Uuid
+  categoryId   String   @map("category_id") @db.Uuid
+  amountMinor  BigInt   @map("amount_minor")
+  // An alert fires at this percentage, and again at 100%.
+  alertPercent Int      @default(80) @map("alert_percent") @db.SmallInt
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-    budget   Budget        @relation(fields: [budgetId], references: [id])
-    category Category      @relation(fields: [categoryId], references: [id])
-    alerts   BudgetAlert[]
+  budget   Budget        @relation(fields: [budgetId], references: [id])
+  category Category      @relation(fields: [categoryId], references: [id])
+  alerts   BudgetAlert[]
 
-    @@unique([budgetId, categoryId])
-    @@map("budget_lines")
+  @@unique([budgetId, categoryId])
+  @@map("budget_lines")
 }
 
 // Each threshold fires once per line. The worker tells people through notifications.
 model BudgetAlert {
-    id           String   @id @default(uuid(7)) @db.Uuid
-    workspaceId  String   @map("workspace_id") @db.Uuid
-    businessId   String   @map("business_id") @db.Uuid
-    budgetLineId String   @map("budget_line_id") @db.Uuid
-    percent      Int      @db.SmallInt
-    actualMinor  BigInt   @map("actual_minor")
-    createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  businessId   String   @map("business_id") @db.Uuid
+  budgetLineId String   @map("budget_line_id") @db.Uuid
+  percent      Int      @db.SmallInt
+  actualMinor  BigInt   @map("actual_minor")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-    line BudgetLine @relation(fields: [budgetLineId], references: [id])
+  line BudgetLine @relation(fields: [budgetLineId], references: [id])
 
-    @@unique([budgetLineId, percent])
-    @@map("budget_alerts")
+  @@unique([budgetLineId, percent])
+  @@map("budget_alerts")
 }
 
 model Goal {
-    id          String     @id @default(uuid(7)) @db.Uuid
-    workspaceId String     @map("workspace_id") @db.Uuid
-    businessId  String     @map("business_id") @db.Uuid
-    name        String
-    metric      GoalMetric
-    targetMinor BigInt     @map("target_minor")
-    startMonth  DateTime   @map("start_month") @db.Date
-    endMonth    DateTime   @map("end_month") @db.Date
-    status      GoalStatus @default(ACTIVE)
-    achievedAt  DateTime?  @map("achieved_at") @db.Timestamptz(3)
-    createdBy   String     @map("created_by") @db.Uuid
-    createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String     @id @default(uuid(7)) @db.Uuid
+  workspaceId String     @map("workspace_id") @db.Uuid
+  businessId  String     @map("business_id") @db.Uuid
+  name        String
+  metric      GoalMetric
+  targetMinor BigInt     @map("target_minor")
+  startMonth  DateTime   @map("start_month") @db.Date
+  endMonth    DateTime   @map("end_month") @db.Date
+  status      GoalStatus @default(ACTIVE)
+  achievedAt  DateTime?  @map("achieved_at") @db.Timestamptz(3)
+  createdBy   String     @map("created_by") @db.Uuid
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-    business Business @relation(fields: [businessId], references: [id])
+  business Business @relation(fields: [businessId], references: [id])
 
-    @@index([businessId, status])
-    @@map("goals")
+  @@index([businessId, status])
+  @@map("goals")
 }
 
 model ReportExport {
-    id          String             @id @default(uuid(7)) @db.Uuid
-    workspaceId String             @map("workspace_id") @db.Uuid
-    businessId  String             @map("business_id") @db.Uuid
-    report      String
-    format      String
-    params      Json
-    locale      String             @db.VarChar(10)
-    digitStyle  String             @map("digit_style") @db.VarChar(10)
-    status      ReportExportStatus @default(QUEUED)
-    fileName    String?            @map("file_name")
-    storageKey  String?            @map("storage_key")
-    errorCode   String?            @map("error_code")
-    requestedBy String             @map("requested_by") @db.Uuid
-    finishedAt  DateTime?          @map("finished_at") @db.Timestamptz(3)
-    createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-    updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String             @id @default(uuid(7)) @db.Uuid
+  workspaceId String             @map("workspace_id") @db.Uuid
+  businessId  String             @map("business_id") @db.Uuid
+  report      String
+  format      String
+  params      Json
+  locale      String             @db.VarChar(10)
+  digitStyle  String             @map("digit_style") @db.VarChar(10)
+  status      ReportExportStatus @default(QUEUED)
+  fileName    String?            @map("file_name")
+  storageKey  String?            @map("storage_key")
+  errorCode   String?            @map("error_code")
+  requestedBy String             @map("requested_by") @db.Uuid
+  finishedAt  DateTime?          @map("finished_at") @db.Timestamptz(3)
+  createdAt   DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-    business Business @relation(fields: [businessId], references: [id])
+  business Business @relation(fields: [businessId], references: [id])
 
-    @@index([businessId, id(sort: Desc)])
-    @@map("report_exports")
+  @@index([businessId, id(sort: Desc)])
+  @@map("report_exports")
 }
 
 // Rates are entered by hand and belong to one workspace. Consolidated figures state which were used.
 model ExchangeRate {
-    id           String   @id @default(uuid(7)) @db.Uuid
-    workspaceId  String   @map("workspace_id") @db.Uuid
-    fromCurrency String   @map("from_currency") @db.Char(3)
-    toCurrency   String   @map("to_currency") @db.Char(3)
-    rateDate     DateTime @map("rate_date") @db.Date
-    rate         Decimal  @db.Decimal(20, 6)
-    createdBy    String   @map("created_by") @db.Uuid
-    createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id           String   @id @default(uuid(7)) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  fromCurrency String   @map("from_currency") @db.Char(3)
+  toCurrency   String   @map("to_currency") @db.Char(3)
+  rateDate     DateTime @map("rate_date") @db.Date
+  rate         Decimal  @db.Decimal(20, 6)
+  createdBy    String   @map("created_by") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-    workspace Workspace @relation(fields: [workspaceId], references: [id])
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
 
-    @@unique([workspaceId, fromCurrency, toCurrency, rateDate])
-    @@map("exchange_rates")
+  @@unique([workspaceId, fromCurrency, toCurrency, rateDate])
+  @@map("exchange_rates")
 }
 
 // Money moved between two of your businesses: one journal in each, against Due From and Due To.
 model IntercompanyTransfer {
-    id             String   @id @default(uuid(7)) @db.Uuid
-    fromBusinessId String   @map("from_business_id") @db.Uuid
-    toBusinessId   String   @map("to_business_id") @db.Uuid
-    fromEntryId    String   @unique @map("from_entry_id") @db.Uuid
-    toEntryId      String   @unique @map("to_entry_id") @db.Uuid
-    amountMinor    BigInt   @map("amount_minor")
-    currency       String   @db.Char(3)
-    transferDate   DateTime @map("transfer_date") @db.Date
-    memo           String?
-    createdBy      String   @map("created_by") @db.Uuid
-    createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  fromBusinessId String   @map("from_business_id") @db.Uuid
+  toBusinessId   String   @map("to_business_id") @db.Uuid
+  fromEntryId    String   @unique @map("from_entry_id") @db.Uuid
+  toEntryId      String   @unique @map("to_entry_id") @db.Uuid
+  amountMinor    BigInt   @map("amount_minor")
+  currency       String   @db.Char(3)
+  transferDate   DateTime @map("transfer_date") @db.Date
+  memo           String?
+  createdBy      String   @map("created_by") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-    fromBusiness Business     @relation("IntercompanyFrom", fields: [fromBusinessId], references: [id])
-    toBusiness   Business     @relation("IntercompanyTo", fields: [toBusinessId], references: [id])
-    fromEntry    JournalEntry @relation("IntercompanyFromEntry", fields: [fromEntryId], references: [id])
-    toEntry      JournalEntry @relation("IntercompanyToEntry", fields: [toEntryId], references: [id])
+  fromBusiness Business     @relation("IntercompanyFrom", fields: [fromBusinessId], references: [id])
+  toBusiness   Business     @relation("IntercompanyTo", fields: [toBusinessId], references: [id])
+  fromEntry    JournalEntry @relation("IntercompanyFromEntry", fields: [fromEntryId], references: [id])
+  toEntry      JournalEntry @relation("IntercompanyToEntry", fields: [toEntryId], references: [id])
 
-    @@index([fromBusinessId])
-    @@index([toBusinessId])
-    @@map("intercompany_transfers")
+  @@index([fromBusinessId])
+  @@index([toBusinessId])
+  @@map("intercompany_transfers")
 }
 
 // The transactional outbox: written in the same transaction as the change, then published to BullMQ
 // by the worker, so an event can't be lost even if Redis is briefly down.
 model OutboxEvent {
-    id          BigInt    @id @default(autoincrement())
-    workspaceId String    @map("workspace_id") @db.Uuid
-    businessId  String    @map("business_id") @db.Uuid
-    type        String
-    payload     Json
-    actorUserId String    @map("actor_user_id") @db.Uuid
-    createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-    publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
+  id          BigInt    @id @default(autoincrement())
+  workspaceId String    @map("workspace_id") @db.Uuid
+  businessId  String    @map("business_id") @db.Uuid
+  type        String
+  payload     Json
+  actorUserId String    @map("actor_user_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  publishedAt DateTime? @map("published_at") @db.Timestamptz(3)
 
-    @@map("outbox_events")
+  @@map("outbox_events")
 }

@@ -1,15 +1,21 @@
 model Workspace {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  name      String
-  plan      String   @default("private")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String
+  // Unused since Phase 11: the plan lives in workspace_subscriptions.
+  plan        String   @default("private")
+  // Who signed up and created it. Only they manage its plan and payments.
+  ownerUserId String?  @map("owner_user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  users      UserWorkspace[]
-  businesses Business[]
-  roles      Role[]
-    exchangeRates ExchangeRate[]
+  owner         User?                  @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  subscription  WorkspaceSubscription?
+  users         UserWorkspace[]
+  businesses    Business[]
+  roles         Role[]
+  exchangeRates ExchangeRate[]
 
+  @@index([ownerUserId])
   @@map("workspaces")
 }
 

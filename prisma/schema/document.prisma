@@ -33,11 +33,11 @@ model Document {
   createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  business    Business                @relation(fields: [businessId], references: [id])
-  attachments TransactionAttachment[]
-  taskAttachments TaskAttachment[]
+  business         Business                @relation(fields: [businessId], references: [id])
+  attachments      TransactionAttachment[]
+  taskAttachments  TaskAttachment[]
   statementImports StatementImport[]
-  chunks DocumentChunk[]
+  chunks           DocumentChunk[]
 
   @@index([businessId, id(sort: Desc)])
   @@map("documents")

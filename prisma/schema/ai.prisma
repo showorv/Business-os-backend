@@ -18,19 +18,19 @@ enum AiProposalStatus {
 // A passage of a document, with its meaning as numbers. The model is stored on each row, so changing
 // model means re-indexing rather than silently mixing vectors that can't be compared.
 model DocumentChunk {
-  id             String                   @id @default(uuid(7)) @db.Uuid
-  workspaceId    String                   @map("workspace_id") @db.Uuid
-  businessId     String                   @map("business_id") @db.Uuid
-  documentId     String                   @map("document_id") @db.Uuid
-  chunkIndex     Int                      @map("chunk_index")
+  id             String                     @id @default(uuid(7)) @db.Uuid
+  workspaceId    String                     @map("workspace_id") @db.Uuid
+  businessId     String                     @map("business_id") @db.Uuid
+  documentId     String                     @map("document_id") @db.Uuid
+  chunkIndex     Int                        @map("chunk_index")
   page           Int
   heading        String?
   content        String
   embedding      Unsupported("vector(384)")
   // Kept up to date by the database from `content`.
-  search         Unsupported("tsvector")? @default(dbgenerated())
-  embeddingModel String                   @map("embedding_model")
-  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  search         Unsupported("tsvector")?   @default(dbgenerated())
+  embeddingModel String                     @map("embedding_model")
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
 
   document Document @relation(fields: [documentId], references: [id])
 

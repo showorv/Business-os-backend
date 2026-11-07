@@ -1,0 +1,59 @@
+// What each plan allows. Rows are seeded by migration and changed later from the platform admin panel.
+// A null limit means no limit.
+model Plan {
+  key               String   @id @db.VarChar(40)
+  name              String
+  nameBn            String?  @map("name_bn")
+  description       String?
+  descriptionBn     String?  @map("description_bn")
+  currency          String   @default("BDT") @db.Char(3)
+  priceMonthlyMinor BigInt   @default(0) @map("price_monthly_minor")
+  priceYearlyMinor  BigInt   @default(0) @map("price_yearly_minor")
+  maxBusinesses     Int?     @map("max_businesses")
+  maxMembers        Int?     @map("max_members")
+  storageMb         Int?     @map("storage_mb")
+  aiEnabled         Boolean  @default(false) @map("ai_enabled")
+  aiDailyTokens     Int      @default(0) @map("ai_daily_tokens")
+  isPublic          Boolean  @default(true) @map("is_public")
+  sortOrder         Int      @default(0) @map("sort_order")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  subscriptions WorkspaceSubscription[]
+
+  @@map("plans")
+}
+
+// How a workspace got its plan: the free default, a trial, a payment, or a grant from the platform admin.
+enum SubscriptionSource {
+  FREE
+  TRIAL
+  PAID
+  GRANT
+}
+
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+// One per workspace. Everyone in the workspace's businesses is covered by it. When endsAt passes, the
+// workspace falls back to Free (after a grace period for paid plans); nothing is ever deleted.
+model WorkspaceSubscription {
+  workspaceId  String             @id @map("workspace_id") @db.Uuid
+  planKey      String             @map("plan_key") @db.VarChar(40)
+  source       SubscriptionSource
+  billingCycle BillingCycle?      @map("billing_cycle")
+  // Null: no end date.
+  endsAt       DateTime?          @map("ends_at") @db.Timestamptz(3)
+  note         String?
+  grantedBy    String?            @map("granted_by") @db.Uuid
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  plan      Plan      @relation(fields: [planKey], references: [key])
+
+  @@index([endsAt])
+  @@map("workspace_subscriptions")
+}

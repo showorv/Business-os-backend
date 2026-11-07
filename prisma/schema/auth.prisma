@@ -22,22 +22,23 @@ model User {
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  workspaces    UserWorkspace[]
-  mfaFactors    MfaFactor[]
-  sessions      UserSession[]
-  refreshTokens RefreshToken[]
+  workspaces      UserWorkspace[]
+  ownedWorkspaces Workspace[]     @relation("WorkspaceOwner")
+  mfaFactors      MfaFactor[]
+  sessions        UserSession[]
+  refreshTokens   RefreshToken[]
 
   createdBusinesses Business[]       @relation("BusinessCreator")
   memberships       BusinessMember[]
 
-  assignedTasks           Task[]                  @relation("TaskAssignee")
-  taskComments            TaskComment[]           @relation("TaskCommentAuthor")
-  reminders               Reminder[]              @relation("ReminderRecipient")
-  notifications           Notification[]
-  notificationPreference  NotificationPreference?
-  pushSubscriptions       PushSubscription[]
-  passwordResetTokens     PasswordResetToken[]
-  aiConversations AiConversation[]
+  assignedTasks          Task[]                  @relation("TaskAssignee")
+  taskComments           TaskComment[]           @relation("TaskCommentAuthor")
+  reminders              Reminder[]              @relation("ReminderRecipient")
+  notifications          Notification[]
+  notificationPreference NotificationPreference?
+  pushSubscriptions      PushSubscription[]
+  passwordResetTokens    PasswordResetToken[]
+  aiConversations        AiConversation[]
 
   @@map("users")
 }

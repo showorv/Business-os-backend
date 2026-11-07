@@ -57,11 +57,11 @@ model FinancialAccount {
   createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  ledgerAccount        LedgerAccount?   @relation(fields: [ledgerAccountId], references: [id])
-  reconciliations      Reconciliation[]
-  business             Business         @relation(fields: [businessId], references: [id])
-  transactions         Transaction[]    @relation("TransactionAccount")
-  incomingTransactions Transaction[]    @relation("TransactionToAccount")
+  ledgerAccount          LedgerAccount?          @relation(fields: [ledgerAccountId], references: [id])
+  reconciliations        Reconciliation[]
+  business               Business                @relation(fields: [businessId], references: [id])
+  transactions           Transaction[]           @relation("TransactionAccount")
+  incomingTransactions   Transaction[]           @relation("TransactionToAccount")
   integrationConnections IntegrationConnection[]
   statementImports       StatementImport[]
   statementLines         StatementLine[]
@@ -86,10 +86,10 @@ model Category {
   createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  ledgerAccount LedgerAccount? @relation(fields: [ledgerAccountId], references: [id])
-  business      Business       @relation(fields: [businessId], references: [id])
-  transactions  Transaction[]
-    budgetLines   BudgetLine[]
+  ledgerAccount  LedgerAccount?  @relation(fields: [ledgerAccountId], references: [id])
+  business       Business        @relation(fields: [businessId], references: [id])
+  transactions   Transaction[]
+  budgetLines    BudgetLine[]
   statementRules StatementRule[]
 
   @@unique([businessId, type, name])
@@ -127,15 +127,15 @@ model Transaction {
   createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  business      Business                @relation(fields: [businessId], references: [id])
-  recurringRuns RecurringRun[]
+  business       Business                @relation(fields: [businessId], references: [id])
+  recurringRuns  RecurringRun[]
   statementLinks StatementLineLink[]
-  account       FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
-  toAccount     FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
-  category      Category?               @relation(fields: [categoryId], references: [id])
-  attachments   TransactionAttachment[]
-  journalEntry  JournalEntry?           @relation("TransactionJournal", fields: [journalEntryId], references: [id])
-  reversalEntry JournalEntry?           @relation("TransactionReversalJournal", fields: [reversalEntryId], references: [id])
+  account        FinancialAccount        @relation("TransactionAccount", fields: [accountId], references: [id])
+  toAccount      FinancialAccount?       @relation("TransactionToAccount", fields: [toAccountId], references: [id])
+  category       Category?               @relation(fields: [categoryId], references: [id])
+  attachments    TransactionAttachment[]
+  journalEntry   JournalEntry?           @relation("TransactionJournal", fields: [journalEntryId], references: [id])
+  reversalEntry  JournalEntry?           @relation("TransactionReversalJournal", fields: [reversalEntryId], references: [id])
 
   @@unique([businessId, number])
   @@index([businessId, txnDate(sort: Desc), id(sort: Desc)])

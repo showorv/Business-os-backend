@@ -12,6 +12,7 @@ import { auditService } from "../audit/audit.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
 import type { ICreateUploadBody, IListDocumentsQuery, ISearchDocumentsQuery, UploadProblem } from "./documents.interface.js";
 import { CSV_MIME } from "./documents.validation.js";
+import { billingService } from "../billing/billing.service.js";
 
 const SNIFF_BYTES = 4100;
 
@@ -39,6 +40,7 @@ const findOrThrow = async (tx: Prisma.TransactionClient, businessId: string, doc
 // Step 1 of an upload: record the document and hand the client a signed URL to send the file to.
 // The key uses a random id, so a user's file name never becomes a storage path.
 const createUpload = async (business: BusinessContext, body: ICreateUploadBody) => {
+  await billingService.assertStorageFor(business.workspaceId, body.sizeBytes);
   const storageKey = `workspaces/${business.workspaceId}/businesses/${business.businessId}/documents/${randomUUID()}`;
 
   const document = await withBusinessScope(business, (tx) =>

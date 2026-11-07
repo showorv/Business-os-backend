@@ -3,6 +3,7 @@ import { accountsRouter } from "../modules/accounts/accounts.router.js";
 import { analyticsRouter } from "../modules/analytics/analytics.router.js";
 import { auditRouter, businessAuditRouter } from "../modules/audit/audit.router.js";
 import { authRouter } from "../modules/auth/auth.router.js";
+import { billingRouter } from "../modules/billing/billing.router.js";
 import { budgetsRouter } from "../modules/budgets/budgets.router.js";
 import { businessesRouter } from "../modules/businesses/businesses.router.js";
 import { categoriesRouter } from "../modules/categories/categories.router.js";
@@ -43,6 +44,7 @@ const moduleRoutes = [
   { path: "/consolidated", router: consolidatedRouter },
   { path: "/notifications", router: notificationsRouter },
   { path: "/ai", router: aiRouter },
+  { path: "/billing", router: billingRouter },
   { path: "/tasks", router: allTasksRouter },
   { path: "/businesses", router: businessesRouter },
   { path: "/businesses/:businessId/members", router: membersRouter },

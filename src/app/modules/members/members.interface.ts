@@ -14,6 +14,8 @@ export interface BusinessContext {
   memberId: string;
   roleKey: RoleKey;
   permissions: string[];
+  // Beyond the workspace plan's business limit after the plan lapsed: readable, but nothing can change.
+  planLocked?: boolean;
 }
 
 export interface IAddMemberInput {

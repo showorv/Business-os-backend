@@ -58,11 +58,13 @@ export const requirePermission = (permission: Permission): RequestHandler => {
   };
 };
 
-// Inactive and archived businesses stay readable, but nothing in them may change.
+// Inactive and archived businesses stay readable, but nothing in them may change. Nor in one locked
+// because the workspace's plan lapsed with more businesses than Free allows.
 export const requireWritableBusiness: RequestHandler = (req, _res, next) => {
   if (req.business?.businessStatus !== "ACTIVE") {
     throw new AppError(409, ErrorCode.BUSINESS_NOT_ACTIVE, { status: req.business?.businessStatus });
   }
+  if (req.business.planLocked) throw new AppError(403, ErrorCode.PLAN_BUSINESS_LOCKED);
   next();
 };
 
