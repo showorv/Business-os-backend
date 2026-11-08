@@ -78,6 +78,8 @@ const reportExport = z.object({
   status: z.enum(["QUEUED", "RUNNING", "READY", "FAILED"]),
   fileName: z.string().nullable(),
   errorCode: z.string().nullable(),
+  finishedAt: z.string().nullable(),
+  createdAt: z.string(),
 });
 
 const rate = z.object({ id: z.uuid(), fromCurrency: z.string(), toCurrency: z.string(), rateDate: z.string(), rate: z.string() });
@@ -114,7 +116,16 @@ addPath("Goals", { method: "get", path: `${goals}/{goalId}`, summary: "One goal 
 addPath("Goals", { method: "patch", path: `${goals}/{goalId}`, summary: "Rename, change the target or cancel. Needs finance.write", params: goalParams, body: goalsValidation.update, response: goal });
 
 addPath("Report exports", { method: "post", path: exportsPath, summary: "Queue a PDF, Excel or CSV export. The worker makes the file. Needs finance.read and recent MFA", params: businessParams, body: reportExportsValidation.create, response: reportExport, status: 202 });
-addPath("Report exports", { method: "get", path: exportsPath, summary: "List exports. Needs finance.read", params: businessParams, query: reportExportsValidation.listQuery, response: z.array(reportExport) });
+addPath("Report exports", {
+  method: "post",
+  path: `${exportsPath}/data`,
+  summary:
+    "Queue an Excel workbook of everything the business holds (accounts, categories, contacts, items, transactions, invoices, journal, budgets, goals, tasks), to take it elsewhere. Report ALL_DATA. Works even when the plan has lapsed. Needs business.manage and recent MFA",
+  params: businessParams,
+  response: reportExport,
+  status: 202,
+});
+addPath("Report exports", { method: "get", path: exportsPath, summary: "List exports. ALL_DATA ones show only to people with business.manage. Needs finance.read", params: businessParams, query: reportExportsValidation.listQuery, response: z.array(reportExport) });
 addPath("Report exports", { method: "get", path: `${exportsPath}/{exportId}`, summary: "Check an export's status. Needs finance.read", params: exportParams, response: reportExport });
 addPath("Report exports", { method: "get", path: `${exportsPath}/{exportId}/download`, summary: "A 5-minute download link. Needs finance.read and recent MFA", params: exportParams, response: z.object({ url: z.string(), expiresIn: z.number() }) });
 

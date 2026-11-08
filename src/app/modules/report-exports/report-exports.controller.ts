@@ -8,6 +8,10 @@ const request: RequestHandler = async (req, res) => {
   sendResponse(res, 202, await reportExportsService.request(req.business!, req.validated.body as ICreateExportBody, getRequestContext(req)));
 };
 
+const requestData: RequestHandler = async (req, res) => {
+  sendResponse(res, 202, await reportExportsService.requestData(req.business!, getRequestContext(req)));
+};
+
 const list: RequestHandler = async (req, res) => {
   sendResponse(res, 200, await reportExportsService.list(req.business!, req.validated.query as IListExportsQuery));
 };
@@ -22,4 +26,4 @@ const download: RequestHandler = async (req, res) => {
   sendResponse(res, 200, await reportExportsService.getDownloadUrl(req.business!, exportId));
 };
 
-export const reportExportsController = { request, list, getOne, download };
+export const reportExportsController = { request, requestData, list, getOne, download };

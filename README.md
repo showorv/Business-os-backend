@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.7 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, saved items, public pages** | ✅ Done |
 
 ## Run it
 
@@ -236,7 +236,7 @@ requireAuth              who are you?
 | 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ✅ Done |
 | 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ✅ Done |
 | 11.7 | Saved items for invoice and bill lines (no stock counting; see below why) | ✅ Done |
-| 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ Next |
+| 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ✅ Done |
 
 ### Step 11.1: Plans and limits
 
@@ -400,7 +400,7 @@ delete            void (only with no payments)        undo a payment moves it ba
 
 **Permissions and audit:** `finance.read` to see, `finance.write` to change. Audit entries: `invoice.created`, `invoice.updated`, `invoice.deleted`, `invoice.issued`, `invoice.payment_recorded`, `invoice.payment_voided`, `invoice.voided`, `invoice.emailed`.
 
-**Not yet:** stock items on lines (11.7), invoices in another currency (only the business's own currency for now), and matching invoice payments to bank statement lines.
+**Not yet:** invoices in another currency (only the business's own currency for now), and matching invoice payments to bank statement lines.
 
 **Database.** Migration `20261110090000_invoices_bills`: the `invoices`, `invoice_lines` and `invoice_payments` tables with row-level security, plus checks in the database itself (paid never above the total, due date not before the date, an issued invoice always has a number). Run `npm run db:deploy` on Neon.
 
@@ -454,6 +454,20 @@ Bangladesh VAT is usually 15%, with lower rates (10%, 7.5%, 5%) and 0% for some 
 **Database.** Migration `20261112090000_items`: the `items` table with row-level security, a unique name per business ignoring case, checks that prices aren't negative and the VAT rate is 0 to 100%, and `item_id` and `unit` on `invoice_lines`. Run `npm run db:deploy` on Neon.
 
 **How it was checked.** 4 new tests (`tests/items.test.ts`): saving with prices and categories; the same name in other letters refused, another business free to use it and unable to see it; a category on the wrong side refused; listing by name, search by code, `use`, archiving and showing archived; lines carrying the item and unit; sold and bought totals leaving out drafts and voids (12.5 sold over two invoices, 20 bought); an archived item, or another business's, refused on a line; the PDF; and the permissions. All 784 tests pass.
+
+### Step 11.8: Launch basics
+
+The public home page, the pricing page, the terms and the privacy policy are frontend pages (see the frontend README). The backend adds two things for them.
+
+**The trial for the public pages.** `GET /platform/signup` needs no sign-in and gives `trialDays`, `trialPlanKey` and `signupsEnabled`, so the home and pricing pages say "Pro free for 14 days" only when that is what a new account really gets.
+
+**All of a business's data in one file.** `POST /businesses/:businessId/report-exports/data` queues one Excel workbook with everything the business holds, one sheet each: About, Accounts, Categories, Customers and suppliers, Items, Transactions, Invoices and bills, Invoice lines, Invoice payments, Chart of accounts, Journal, Budgets, Goals and Tasks. Money is written as numbers, the header row stays in view while scrolling, and text that looks like a formula (`=Karim`) stays text. Drafts without a number show as `DRAFT-<id>`. Uploaded files are not inside; they stay in Documents. It goes through the same queue, worker, notification and 5-minute download link as other exports, and the file is named `<business>-data-<date>.xlsx`.
+
+Only owners and admins (`business.manage`) can ask for it, with a recent two-step code, 5 times an hour per person. The export is hidden from everyone else's export list, and its download link is refused to them (404) even with the id. Audit entry `business.data_export_requested`.
+
+**No migration** in this step: the data export uses the existing `report_exports` table with the report name `ALL_DATA`.
+
+**How it was checked.** 1 new test in `tests/exports.test.ts`: the workbook's sheet names in order, the business and a customer in it, `=Karim` kept as text, the journal's debits equal to its credits, and an accountant refused, not shown the export, and refused its link. 1 new test in `tests/platform-admin.test.ts` for `GET /platform/signup` following the admin's trial setting. All 785 tests pass.
 
 ## What was built in Phase 8
 
@@ -1374,6 +1388,7 @@ Swagger UI is generated from the same Zod schemas that validate requests. `.gith
 | POST / GET | `.../report-exports` | `finance.read` (+ recent MFA to create) | Queue or list exports |
 | GET | `.../report-exports/:exportId` | `finance.read` | Check status |
 | GET | `.../report-exports/:exportId/download` | `finance.read` + recent MFA | Download link |
+| POST | `.../report-exports/data` | `business.manage` + recent MFA | Queue an Excel file of all the business's data (5 an hour) |
 | POST / GET | `/exchange-rates` | Bearer | Save or list your workspace's rates |
 | GET | `/consolidated/dashboard?fromMonth=&toMonth=&reportingCurrency=` | Bearer | All businesses you may read |
 | POST / GET | `/consolidated/intercompany-transfers` | `ledger.post` in both / Bearer | Move money between businesses, or list |

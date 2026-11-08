@@ -21,6 +21,15 @@ router.post(
   validate({ body: reportExportsValidation.create }),
   reportExportsController.request,
 );
+// Everything the business holds, as one workbook. For owners and admins; allowed even when the plan
+// has lapsed, since people can always take their data with them.
+router.post(
+  "/data",
+  businessRead(Permission.BUSINESS_MANAGE),
+  requireRecentMfa,
+  rateLimit({ name: "data-export", windowSeconds: 3600, max: 5, by: "user" }),
+  reportExportsController.requestData,
+);
 router.get("/", canRead, validate({ query: reportExportsValidation.listQuery }), reportExportsController.list);
 router.get("/:exportId", canRead, validate({ params }), reportExportsController.getOne);
 router.get("/:exportId/download", canRead, requireRecentMfa, validate({ params }), reportExportsController.download);

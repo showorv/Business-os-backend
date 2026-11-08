@@ -204,6 +204,8 @@ describe("platform settings", () => {
     const closed = await api().post(`${API}/auth/register`).send({ email: uniqueEmail(), password: "correct-horse-battery", name: "Someone" });
     expect(closed.status).toBe(403);
     expect(closed.body.error.code).toBe("SIGNUPS_CLOSED");
+    // The public pages see the same: no trial now, and sign-ups closed.
+    expect((await api().get(`${API}/platform/signup`)).body.data).toEqual({ trialDays: 0, trialPlanKey: "pro", signupsEnabled: false });
     expect((await api().post(`${API}/auth/register`).send({ email: invitedEmail, password: "correct-horse-battery", name: "Invited" })).status).toBe(201);
 
     useFakeModel();

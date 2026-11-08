@@ -88,6 +88,14 @@ addPath("Platform", {
 
 addPath(T, {
   method: "get",
+  path: "/platform/signup",
+  summary: "The free trial a new sign-up gets (days and plan; 0 days means they start on Free) and whether sign-ups are open. No sign-in needed",
+  response: z.object({ trialDays: z.number().int(), trialPlanKey: z.string(), signupsEnabled: z.boolean() }),
+  secured: false,
+});
+
+addPath(T, {
+  method: "get",
   path: "/admin/overview",
   summary: "Accounts by plan state, people, and money received. Platform admins with two-step verification only, like every /admin route",
   response: z.object({

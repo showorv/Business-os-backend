@@ -53,4 +53,10 @@ const announcement = async () => {
   return announcement.active ? { tone: announcement.tone, en: announcement.en, bn: announcement.bn || announcement.en } : null;
 };
 
-export const platformService = { settings, update, forgetCache, announcement };
+// What the public home and pricing pages say about signing up: the free trial, and whether sign-ups are open.
+const signup = async () => {
+  const { trialDays, trialPlanKey, signupsEnabled } = await settings();
+  return { trialDays, trialPlanKey, signupsEnabled };
+};
+
+export const platformService = { settings, update, forgetCache, announcement, signup };

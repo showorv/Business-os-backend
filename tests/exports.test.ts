@@ -211,3 +211,68 @@ describe("the export flow", () => {
     await expect(withRls(scope, (tx) => tx.$executeRawUnsafe(`DELETE FROM report_exports`))).rejects.toThrow(/permission denied/);
   });
 });
+
+describe("all of a business's data", () => {
+  it("gives owners one workbook with a sheet per kind of record, and keeps it from people who can only read money", async () => {
+    const f = await seed();
+    const karim = (await api().post(`${f.base}/contacts`).set("Authorization", f.auth).send({ kind: "CUSTOMER", name: "=Karim" })).body.data.id as string;
+    await api().post(`${f.base}/items`).set("Authorization", f.auth).send({ name: "Shirt", unit: "pcs", salePriceMinor: "85000" });
+    await api()
+      .post(`${f.base}/invoices`)
+      .set("Authorization", f.auth)
+      .send({ kind: "SALE", contactId: karim, issueDate: "2026-11-05", dueDate: "2026-11-20", lines: [{ description: "Shirt", quantity: "2", unitPriceMinor: "85000", categoryId: f.salesId, unit: "pcs" }] });
+
+    const created = await api().post(`${f.base}/report-exports/data`).set("Authorization", f.auth);
+    expect(created.status).toBe(202);
+    expect(created.body.data).toMatchObject({ report: "ALL_DATA", format: "XLSX", status: "QUEUED" });
+    await runPendingEvents();
+
+    const url = `${f.base}/report-exports/${created.body.data.id}`;
+    const status = await api().get(url).set("Authorization", f.auth);
+    expect(status.body.data.status).toBe("READY");
+    expect(status.body.data.fileName).toMatch(/-data-\d{4}-\d{2}-\d{2}\.xlsx$/);
+    const link = await api().get(`${url}/download`).set("Authorization", f.auth);
+    const bytes = Buffer.from(await (await fetch(link.body.data.url)).arrayBuffer());
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes as unknown as ArrayBuffer);
+    expect(workbook.worksheets.map((sheet) => sheet.name)).toEqual([
+      "About",
+      "Accounts",
+      "Categories",
+      "Customers and suppliers",
+      "Items",
+      "Transactions",
+      "Invoices and bills",
+      "Invoice lines",
+      "Invoice payments",
+      "Chart of accounts",
+      "Journal",
+      "Budgets",
+      "Goals",
+      "Tasks",
+    ]);
+    const rows = (name: string) => (workbook.getWorksheet(name)!.getSheetValues() as unknown[][]).filter(Boolean).map((row) => row.slice(1));
+    const transactions = rows("Transactions");
+    expect(transactions[0]).toContain("Amount");
+    expect(transactions).toHaveLength(3);
+    expect(transactions.some((row) => row.includes(1250000) && row.includes("Sales"))).toBe(true);
+    // A name that looks like a formula stays plain text in a cell.
+    expect(rows("Customers and suppliers")[1]).toContain("=Karim");
+    expect(rows("Invoice lines")[1]).toEqual(expect.arrayContaining([2, "pcs", 850, 1700, "Sales"]));
+    // A draft has no number, so it is named by its id.
+    expect(String(rows("Invoices and bills")[1]![1])).toMatch(/^DRAFT-/);
+    // Every journal line, debits equal to credits.
+    const journal = rows("Journal").slice(1);
+    const sum = (index: number) => journal.reduce((total, row) => total + Number(row[index] ?? 0), 0);
+    expect(sum(7)).toBeCloseTo(sum(8));
+
+    // An accountant can read money but not take everything: not asked, not listed, not downloaded.
+    const accountant = await addMember(f.owner, f.businessId, "ACCOUNTANT");
+    const asAccountant = `Bearer ${accountant.accessToken}`;
+    expect((await api().post(`${f.base}/report-exports/data`).set("Authorization", asAccountant)).body.error.code).toBe("PERMISSION_DENIED");
+    const listed = await api().get(`${f.base}/report-exports`).set("Authorization", asAccountant);
+    expect(listed.body.data.some((row: { report: string }) => row.report === "ALL_DATA")).toBe(false);
+    expect((await api().get(`${url}/download`).set("Authorization", asAccountant)).status).toBe(404);
+  }, 30000);
+});

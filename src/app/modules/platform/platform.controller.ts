@@ -6,4 +6,8 @@ const announcement: RequestHandler = async (_req, res) => {
   sendResponse(res, 200, await platformService.announcement());
 };
 
-export const platformController = { announcement };
+const signup: RequestHandler = async (_req, res) => {
+  sendResponse(res, 200, await platformService.signup());
+};
+
+export const platformController = { announcement, signup };
