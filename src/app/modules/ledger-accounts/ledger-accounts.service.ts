@@ -1,6 +1,6 @@
 import type { Prisma } from "../../../lib/prisma.js";
 import { withBusinessScope } from "../../../lib/rls.js";
-import { CODE_RANGES, chartTemplateFor, LedgerCode, normalBalanceOf } from "../../constants/chartOfAccounts.js";
+import { CODE_RANGES, chartTemplateFor, commonTemplate, LedgerCode, normalBalanceOf } from "../../constants/chartOfAccounts.js";
 import { AppError, ErrorCode, isUniqueViolation } from "../../utils/errors.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
@@ -24,6 +24,18 @@ const seedChart = (tx: Prisma.TransactionClient, actor: LedgerActor, businessTyp
     })),
     skipDuplicates: true,
   });
+
+// Like getByCode, but first adds the account if the business was created before it existed
+// (for example VAT Payable, added in 11.6). Only for accounts in the common chart.
+const ensureByCode = async (tx: Prisma.TransactionClient, actor: LedgerActor, code: string) => {
+  const template = commonTemplate(code);
+  if (!template) throw new Error(`no common account ${code}`);
+  await tx.ledgerAccount.createMany({
+    data: [{ ...template, workspaceId: actor.workspaceId, businessId: actor.businessId, createdBy: actor.userId, isSystem: true }],
+    skipDuplicates: true,
+  });
+  return getByCode(tx, actor.businessId, code);
+};
 
 const getByCode = async (tx: Prisma.TransactionClient, businessId: string, code: string) => {
   const account = await tx.ledgerAccount.findUnique({ where: { businessId_code: { businessId, code } } });
@@ -195,6 +207,7 @@ const assertCategoryAccountFits = async (
 
 export const ledgerAccountsService = {
   seedChart,
+  ensureByCode,
   getByCode,
   createForFinancialAccount,
   createForCategory,

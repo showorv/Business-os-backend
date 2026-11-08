@@ -16,8 +16,12 @@ export const LedgerCode = {
   SALARIES: "6000",
   CASH: "1100",
   ACCOUNTS_RECEIVABLE: "1200",
+  // VAT paid on purchases that can be set against VAT collected (VAT-registered businesses only).
+  VAT_INPUT: "1400",
   DUE_FROM_BUSINESSES: "1300",
   ACCOUNTS_PAYABLE: "2000",
+  // VAT collected on sales, owed to NBR until paid.
+  VAT_PAYABLE: "2200",
   DUE_TO_BUSINESSES: "2300",
   OWNERS_EQUITY: "3000",
   OWNERS_DRAWINGS: "3100",
@@ -50,9 +54,11 @@ const COMMON: ChartTemplate[] = [
   account("1100", "Cash", "নগদ", "ASSET"),
   account("1200", "Accounts Receivable", "প্রাপ্য হিসাব", "ASSET"),
   account("1300", "Due From Other Businesses", "অন্য ব্যবসা থেকে প্রাপ্য", "ASSET"),
+  account("1400", "VAT Input (Recoverable)", "উপকরণ ভ্যাট (ফেরতযোগ্য)", "ASSET"),
   account("1500", "Fixed Assets", "স্থায়ী সম্পদ", "ASSET", { cashFlowClass: "INVESTING" }),
   account("2000", "Accounts Payable", "প্রদেয় হিসাব", "LIABILITY"),
   account("2100", "Payroll Liabilities", "বেতন সংক্রান্ত দায়", "LIABILITY"),
+  account("2200", "VAT Payable", "প্রদেয় ভ্যাট", "LIABILITY"),
   account("2300", "Due To Other Businesses", "অন্য ব্যবসাকে প্রদেয়", "LIABILITY"),
   account("2500", "Loans Payable", "প্রদেয় ঋণ", "LIABILITY", { cashFlowClass: "FINANCING" }),
   account("3000", "Owner's Equity", "মালিকের মূলধন", "EQUITY", { cashFlowClass: "FINANCING" }),
@@ -92,6 +98,9 @@ const BY_BUSINESS_TYPE: Record<string, ChartTemplate[]> = {
   ],
   CUSTOM: [SALES],
 };
+
+// One of the accounts every business has, by code. For accounts added after a business was created.
+export const commonTemplate = (code: string) => COMMON.find((template) => template.code === code);
 
 export const chartTemplateFor = (businessType: string) => [...COMMON, ...(BY_BUSINESS_TYPE[businessType] ?? [])];
 

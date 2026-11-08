@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.5 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.6 done) |
 
 ## Run it
 
@@ -234,8 +234,8 @@ requireAuth              who are you?
 | 11.3 | Platform admin panel: workspaces and users, change plans, grant Pro until a date, prices and limits, coupons, AI cap, suspend, revenue, announcements | ✅ Done |
 | 11.4 | Customers and suppliers | ✅ Done |
 | 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ✅ Done |
-| 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ⬜ Next |
-| 11.7 | Products and stock | ⬜ |
+| 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ✅ Done |
+| 11.7 | Products and stock | ⬜ Next |
 | 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ |
 
 ### Step 11.1: Plans and limits
@@ -400,11 +400,42 @@ delete            void (only with no payments)        undo a payment moves it ba
 
 **Permissions and audit:** `finance.read` to see, `finance.write` to change. Audit entries: `invoice.created`, `invoice.updated`, `invoice.deleted`, `invoice.issued`, `invoice.payment_recorded`, `invoice.payment_voided`, `invoice.voided`, `invoice.emailed`.
 
-**Not yet:** VAT on lines (11.6), stock items on lines (11.7), invoices in another currency (only the business's own currency for now), and matching invoice payments to bank statement lines.
+**Not yet:** stock items on lines (11.7), invoices in another currency (only the business's own currency for now), and matching invoice payments to bank statement lines.
 
 **Database.** Migration `20261110090000_invoices_bills`: the `invoices`, `invoice_lines` and `invoice_payments` tables with row-level security, plus checks in the database itself (paid never above the total, due date not before the date, an issued invoice always has a number). Run `npm run db:deploy` on Neon.
 
 **How it was checked.** 10 new tests (`tests/invoices.test.ts`): line amounts and rounding, and that the posting rules always balance; drafting, changing and issuing with numbers in order, and the books moving only on issue; part and full payments, paying too much refused, undoing a payment and voiding; a bill paid from the bank; the wrong contact kind or category side, a zero invoice and bad dates refused; the list filters and another business kept out; baki by age, per contact and as of an earlier day; the PDF and the email with its attachment; and the money permissions. All 773 tests pass.
+
+### Step 11.6: VAT on invoices and bills, and the month's VAT
+
+Bangladesh VAT is usually 15%, with lower rates (10%, 7.5%, 5%) and 0% for some goods. This step helps a business keep its VAT right and fill in its monthly return (Mushak 9.1). It does not file anything with NBR.
+
+**Is the business VAT-registered?** Two new business settings: `vatRegistered` (has a BIN; off by default) and `defaultVatRateBp`, the rate new invoice lines start with (1500 = 15%, the default). Rates are kept in basis points, so 7.5% is 750.
+
+**VAT on a line.** Every invoice and bill line can have `vatRateBp` (0 to 100%, 0 if left out). The line's VAT is its amount × rate, rounded to the nearest paisa (half up). The invoice keeps a **subtotal**, the **VAT** and the **total** (subtotal + VAT; the database checks they add up).
+
+**What it does to the books when issued**
+- **Invoice with VAT:** debit Accounts Receivable for the full total, credit the sales accounts with the subtotal, and credit **VAT Payable (2200)** with the VAT. The VAT is money owed to the government, not income.
+- **Bill, business registered:** the VAT goes to **VAT Input (1400)**, an asset, because it can be claimed back against output VAT. The expense is only the price without VAT.
+- **Bill, business not registered:** the VAT can't be claimed, so it is added to the expense on each line. The bill is marked `vatRecoverable: false`.
+- **An invoice with VAT from a business that isn't registered** is refused (`VAT_NOT_REGISTERED`), including when a draft made earlier is issued after the setting was turned off.
+- Accounts 1400 and 2200 are now in every new business's chart. An older business gets them created the first time it needs them, so `npm run db:provision` isn't required.
+
+**The monthly summary.** `GET /businesses/:businessId/vat/summary?from=2026-11-01&to=2026-11-30` (at most 366 days) adds up issued, part-paid and paid invoices and bills dated in the period. Drafts and voided ones are left out.
+- **Output VAT:** invoices, by rate, with the taxable value and the VAT.
+- **Input VAT:** bills whose VAT was claimed, by rate.
+- **Net:** output less input; above zero is VAT to pay, below zero is carried forward.
+- **Documents:** each invoice and bill with its date, number, contact, the contact's BIN, subtotal and VAT, which is what the return's sale and purchase lists ask for.
+
+**The PDF.** An invoice with VAT is titled **Tax invoice** (কর চালান), with a VAT column showing each line's rate and amount, and Subtotal and VAT rows above the total.
+
+**Not covered:** VAT on sales and purchases recorded only as plain transactions (not as invoices), supplementary duty, VAT deducted at source, and filing the return. The summary is a help for the person filing it.
+
+**Permissions:** the summary needs `finance.read`.
+
+**Database.** Migration `20261111090000_vat`: VAT columns on `invoices` and `invoice_lines`, the subtotal of every existing invoice set to its total, a check that the total is subtotal + VAT, and an index by date for the summary. Run `npm run db:deploy` on Neon.
+
+**How it was checked.** 7 new tests (`tests/vat.test.ts`): rounding half up; the posting rules balance with VAT on either side; a registered invoice posts to receivables, sales and VAT Payable; VAT refused when not registered, also at issue; a bill's VAT claimed into 1400 when registered and added to the expense when not; the summary by rate, leaving out drafts, voids and other months, with the right net and document list, and a bad period refused; the PDF; and the permission. All 780 tests pass.
 
 ## What was built in Phase 8
 
@@ -1550,7 +1581,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4) and invoices (11.5) migrations, all still to run.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4), invoices (11.5) and VAT (11.6, `20261111090000_vat`) migrations, all still to run.
    Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.

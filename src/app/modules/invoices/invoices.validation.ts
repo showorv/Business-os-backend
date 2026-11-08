@@ -24,6 +24,8 @@ const line = z.object({
   quantity: quantityField,
   unitPriceMinor: minorAmountField,
   categoryId: z.uuid(),
+  // VAT in basis points: 1500 is 15%, 750 is 7.5%. Prices are before VAT.
+  vatRateBp: z.number().int().min(0).max(10000).default(0),
 });
 
 const fields = {

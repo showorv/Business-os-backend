@@ -21,6 +21,10 @@ const settingsShape = {
     .regex(/^\d{1,18}$/)
     .nullable(),
   enabledModules: z.array(z.enum(["finance", "tasks", "documents", "integrations", "ai"])),
+  // VAT (11.6). Only a registered business charges VAT on invoices and claims it back on bills.
+  vatRegistered: z.boolean(),
+  // The rate new invoice lines start with, in basis points: 1500 is 15%.
+  defaultVatRateBp: z.number().int().min(0).max(10000),
 };
 
 export const defaultBusinessSettings = {
@@ -32,6 +36,8 @@ export const defaultBusinessSettings = {
   transactionPrefix: "TXN",
   approvalThresholdMinor: null,
   enabledModules: ["finance", "tasks", "documents", "integrations", "ai"],
+  vatRegistered: false,
+  defaultVatRateBp: 1500,
 };
 
 const settingsPatch = z.object(settingsShape).partial();

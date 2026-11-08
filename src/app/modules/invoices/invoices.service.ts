@@ -8,7 +8,7 @@ import { fromDbDate, todayInTimezone, toDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import { formatMoney } from "../../utils/money.js";
 import { pageArgs, toPage } from "../../utils/pagination.js";
-import { buildInvoiceLines, buildInvoicePaymentLines, lineAmountMinor } from "../../utils/postingRules.js";
+import { buildInvoiceLines, buildInvoicePaymentLines, lineAmountMinor, lineVatMinor } from "../../utils/postingRules.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { nextSequence } from "../../utils/sequences.js";
 import { accountsService } from "../accounts/accounts.service.js";
@@ -95,7 +95,19 @@ const assertContact = async (tx: Prisma.TransactionClient, businessId: string, c
   if (!CONTACT_KINDS[kind].includes(contact.kind)) throw new AppError(422, ErrorCode.CONTACT_KIND_MISMATCH, { kind: contact.kind });
 };
 
-// Checks each line's category and works out its amount. Returns rows ready to insert.
+// Whether the business charges and claims VAT. Businesses made before 11.6 have no setting: not registered.
+const vatSettings = async (tx: Prisma.TransactionClient, businessId: string) => {
+  const { settings } = await tx.business.findUniqueOrThrow({ where: { id: businessId }, select: { settings: true } });
+  return { registered: (settings as { vatRegistered?: boolean }).vatRegistered === true };
+};
+
+// Only a VAT-registered business may charge VAT on an invoice. A bill can always show the VAT the
+// supplier charged; for an unregistered business that VAT is simply part of the cost.
+const assertVatAllowed = (kind: Kind, vatMinor: bigint, registered: boolean) => {
+  if (kind === "SALE" && vatMinor > 0n && !registered) throw new AppError(422, ErrorCode.VAT_NOT_REGISTERED);
+};
+
+// Checks each line's category and works out its amount and VAT. Returns rows ready to insert.
 const prepareLines = async (tx: Prisma.TransactionClient, businessId: string, kind: Kind, lines: IInvoiceLineInput[]) => {
   const prepared = [];
   for (const [index, line] of lines.entries()) {
@@ -104,17 +116,23 @@ const prepareLines = async (tx: Prisma.TransactionClient, businessId: string, ki
       throw new AppError(422, ErrorCode.CATEGORY_TYPE_MISMATCH, { line: index + 1, expected: CATEGORY_TYPE[kind] });
     }
     const unitPriceMinor = BigInt(line.unitPriceMinor);
+    const amountMinor = lineAmountMinor(line.quantity, unitPriceMinor);
     prepared.push({
       businessId,
       lineNo: index + 1,
       description: line.description,
       quantity: line.quantity,
       unitPriceMinor,
-      amountMinor: lineAmountMinor(line.quantity, unitPriceMinor),
+      amountMinor,
+      vatRateBp: line.vatRateBp,
+      vatMinor: lineVatMinor(amountMinor, line.vatRateBp),
       categoryId: line.categoryId,
     });
   }
-  return { lines: prepared, totalMinor: prepared.reduce((sum, line) => sum + line.amountMinor, 0n) };
+  const subtotalMinor = prepared.reduce((sum, line) => sum + line.amountMinor, 0n);
+  const vatMinor = prepared.reduce((sum, line) => sum + line.vatMinor, 0n);
+  assertVatAllowed(kind, vatMinor, (await vatSettings(tx, businessId)).registered);
+  return { lines: prepared, subtotalMinor, vatMinor, totalMinor: subtotalMinor + vatMinor };
 };
 
 const statusAfterPayment = (totalMinor: bigint, paidMinor: bigint) =>
@@ -137,11 +155,23 @@ const issueInTx = async (tx: Prisma.TransactionClient, business: BusinessContext
 
   // The contact or a category may have been archived since the draft was saved.
   await assertContact(tx, business.businessId, invoice.contactId, invoice.kind);
+  // The setting may have changed since the draft was saved.
+  const { registered } = await vatSettings(tx, business.businessId);
+  assertVatAllowed(invoice.kind, invoice.vatMinor, registered);
+  // VAT on a bill is claimed back only by a registered business; otherwise it is part of the cost.
+  const vatRecoverable = invoice.kind === "BILL" && registered && invoice.vatMinor > 0n;
+  const vatIntoCost = invoice.kind === "BILL" && !vatRecoverable;
+
   const ledgerLines = [];
   for (const line of invoice.lines) {
     const category = await categoriesService.getUsable(tx, business.businessId, line.categoryId);
     if (!category.ledgerAccountId) throw new AppError(409, ErrorCode.BUSINESS_NOT_PROVISIONED);
-    ledgerLines.push({ ledgerAccountId: category.ledgerAccountId, amountMinor: line.amountMinor });
+    ledgerLines.push({ ledgerAccountId: category.ledgerAccountId, amountMinor: line.amountMinor + (vatIntoCost ? line.vatMinor : 0n) });
+  }
+  let vat: { ledgerAccountId: string; amountMinor: bigint } | null = null;
+  if (invoice.vatMinor > 0n && !vatIntoCost) {
+    const vatAccount = await ledgerAccountsService.ensureByCode(tx, business, invoice.kind === "SALE" ? LedgerCode.VAT_PAYABLE : LedgerCode.VAT_INPUT);
+    vat = { ledgerAccountId: vatAccount.id, amountMinor: invoice.vatMinor };
   }
 
   const year = invoice.issueDate.getUTCFullYear();
@@ -156,19 +186,19 @@ const issueInTx = async (tx: Prisma.TransactionClient, business: BusinessContext
     sourceType: "invoice",
     sourceId: invoice.id,
     allowSoftClosed: canPostToSoftClosed(business),
-    lines: buildInvoiceLines({ kind: invoice.kind, controlLedgerId: control.id, memo: number, lines: ledgerLines }),
+    lines: buildInvoiceLines({ kind: invoice.kind, controlLedgerId: control.id, memo: number, lines: ledgerLines, vat }),
   });
 
   await tx.invoice.update({
     where: { id: invoice.id },
-    data: { status: "ISSUED", number, journalEntryId: entry.id, issuedAt: new Date(), issuedBy: business.userId },
+    data: { status: "ISSUED", number, journalEntryId: entry.id, issuedAt: new Date(), issuedBy: business.userId, vatRecoverable },
   });
   await auditService.recordForBusiness(tx, business, {
     action: "invoice.issued",
     context,
     entityType: "invoice",
     entityId: invoice.id,
-    after: { kind: invoice.kind, number, totalMinor: invoice.totalMinor, entryNo: entry.entryNo },
+    after: { kind: invoice.kind, number, totalMinor: invoice.totalMinor, vatMinor: invoice.vatMinor, vatRecoverable, entryNo: entry.entryNo },
   });
 };
 
@@ -179,7 +209,7 @@ const issueInTx = async (tx: Prisma.TransactionClient, business: BusinessContext
 const create = (business: BusinessContext, body: ICreateInvoiceBody, context: RequestContext) =>
   withBusinessScope(business, async (tx) => {
     await assertContact(tx, business.businessId, body.contactId, body.kind);
-    const { lines, totalMinor } = await prepareLines(tx, business.businessId, body.kind, body.lines);
+    const { lines, subtotalMinor, vatMinor, totalMinor } = await prepareLines(tx, business.businessId, body.kind, body.lines);
 
     const invoice = await tx.invoice.create({
       data: {
@@ -190,6 +220,8 @@ const create = (business: BusinessContext, body: ICreateInvoiceBody, context: Re
         issueDate: toDbDate(body.issueDate),
         dueDate: toDbDate(body.dueDate),
         currency: business.baseCurrency,
+        subtotalMinor,
+        vatMinor,
         totalMinor,
         referenceNo: body.referenceNo ?? null,
         notes: body.notes ?? null,
@@ -202,7 +234,7 @@ const create = (business: BusinessContext, body: ICreateInvoiceBody, context: Re
       context,
       entityType: "invoice",
       entityId: invoice.id,
-      after: { kind: body.kind, contactId: body.contactId, totalMinor, lines: lines.length },
+      after: { kind: body.kind, contactId: body.contactId, totalMinor, vatMinor, lines: lines.length },
     });
     if (body.issue) await issueInTx(tx, business, invoice.id, context);
     return toDto(await load(tx, business.businessId, invoice.id), todayInTimezone(business.timezone));
@@ -226,10 +258,10 @@ const update = (business: BusinessContext, invoiceId: string, body: IUpdateInvoi
       ...(body.notes !== undefined ? { notes: body.notes } : {}),
     };
     if (body.lines) {
-      const { lines, totalMinor } = await prepareLines(tx, business.businessId, before.kind, body.lines);
+      const { lines, subtotalMinor, vatMinor, totalMinor } = await prepareLines(tx, business.businessId, before.kind, body.lines);
       await tx.invoiceLine.deleteMany({ where: { invoiceId } });
       await tx.invoiceLine.createMany({ data: lines.map((line) => ({ ...line, invoiceId })) });
-      data.totalMinor = totalMinor;
+      Object.assign(data, { subtotalMinor, vatMinor, totalMinor });
     }
     const after = await tx.invoice.update({ where: { id: invoiceId }, data });
     await auditService.recordForBusiness(tx, business, {
@@ -488,6 +520,8 @@ const documentFor = async (business: BusinessContext, invoiceId: string) =>
       issueDate: fromDbDate(invoice.issueDate),
       dueDate: fromDbDate(invoice.dueDate),
       currency: invoice.currency,
+      subtotalMinor: invoice.subtotalMinor,
+      vatMinor: invoice.vatMinor,
       totalMinor: invoice.totalMinor,
       paidMinor: invoice.paidMinor,
       referenceNo: invoice.referenceNo,

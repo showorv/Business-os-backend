@@ -93,16 +93,19 @@ export const buildTransactionLines = (input: PostingInput) => RULES[input.type](
 // Invoices and bills (11.5)
 // ---------------------------------------------------------------------------
 
-// A sale on credit: Dr receivables for the total, Cr each revenue account for its lines.
-// A bill: Dr each expense account, Cr payables for the total. Lines on one account are added up.
+// A sale on credit: Dr receivables for the total, Cr each revenue account for its lines, Cr VAT
+// Payable for the VAT charged. A bill: Dr each expense account, Dr VAT Input for VAT that can be
+// claimed back, Cr payables for the total. Lines on one account are added up.
 export const buildInvoiceLines = (input: {
   kind: "SALE" | "BILL";
   controlLedgerId: string;
   memo: string;
   lines: { ledgerAccountId: string; amountMinor: bigint }[];
+  vat?: { ledgerAccountId: string; amountMinor: bigint } | null;
 }): JournalLineInput[] => {
   const byLedger = new Map<string, bigint>();
-  for (const line of input.lines) {
+  const parts = [...input.lines, ...(input.vat ? [input.vat] : [])];
+  for (const line of parts) {
     if (line.amountMinor > 0n) byLedger.set(line.ledgerAccountId, (byLedger.get(line.ledgerAccountId) ?? 0n) + line.amountMinor);
   }
   const total = [...byLedger.values()].reduce((sum, amount) => sum + amount, 0n);
@@ -112,6 +115,9 @@ export const buildInvoiceLines = (input: {
   const control = input.kind === "SALE" ? debit(input.controlLedgerId, total, input.memo) : credit(input.controlLedgerId, total, input.memo);
   return [control, ...detail];
 };
+
+// VAT on one line: amount × rate (in basis points, 1500 = 15%), rounded half up.
+export const lineVatMinor = (amountMinor: bigint, rateBp: number) => (amountMinor * BigInt(rateBp) + 5000n) / 10000n;
 
 // Money against an invoice: Dr where it landed, Cr receivables. Against a bill: Dr payables, Cr where it left.
 export const buildInvoicePaymentLines = (input: {

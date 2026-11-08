@@ -28,7 +28,12 @@ model Invoice {
   issueDate      DateTime      @map("issue_date") @db.Date
   dueDate        DateTime      @map("due_date") @db.Date
   currency       String        @db.Char(3)
+  // Before VAT, the VAT on it, and the two together (11.6). Without VAT, subtotal equals total.
+  subtotalMinor  BigInt        @default(0) @map("subtotal_minor")
+  vatMinor       BigInt        @default(0) @map("vat_minor")
   totalMinor     BigInt        @map("total_minor")
+  // A bill's VAT can be claimed back only by a VAT-registered business. Fixed when issued.
+  vatRecoverable Boolean       @default(false) @map("vat_recoverable")
   paidMinor      BigInt        @default(0) @map("paid_minor")
   // The supplier's own bill number, or a customer's order number.
   referenceNo    String?       @map("reference_no")
@@ -53,6 +58,8 @@ model Invoice {
   @@unique([businessId, number])
   @@index([businessId, kind, status, dueDate])
   @@index([businessId, contactId])
+  // The VAT summary reads invoices and bills by date.
+  @@index([businessId, issueDate])
   @@map("invoices")
 }
 
@@ -64,8 +71,11 @@ model InvoiceLine {
   description    String
   quantity       Decimal @db.Decimal(12, 3)
   unitPriceMinor BigInt  @map("unit_price_minor")
-  // quantity × unit price, rounded to the minor unit.
+  // quantity × unit price, rounded to the minor unit. Before VAT.
   amountMinor    BigInt  @map("amount_minor")
+  // VAT in basis points (1500 is 15%), and the VAT on this line, rounded half up.
+  vatRateBp      Int     @default(0) @map("vat_rate_bp")
+  vatMinor       BigInt  @default(0) @map("vat_minor")
   // An income category on an invoice, an expense category on a bill. It picks the ledger account.
   categoryId     String  @map("category_id") @db.Uuid
 

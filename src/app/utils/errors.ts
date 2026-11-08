@@ -145,6 +145,8 @@ export const ErrorCode = {
   PAYMENT_ALREADY_VOID: "PAYMENT_ALREADY_VOID",
   // An invoice needs a customer, a bill a supplier (BOTH fits either).
   CONTACT_KIND_MISMATCH: "CONTACT_KIND_MISMATCH",
+  // VAT on an invoice needs the business to be VAT-registered (business settings).
+  VAT_NOT_REGISTERED: "VAT_NOT_REGISTERED",
   // Sending invoices by email needs SMTP set up on the server.
   EMAIL_NOT_CONFIGURED: "EMAIL_NOT_CONFIGURED",
   // Only a sales invoice that is issued can be sent, and only somewhere with an address.

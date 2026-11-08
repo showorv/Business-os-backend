@@ -10,13 +10,15 @@ export interface InvoiceDocument {
   issueDate: string;
   dueDate: string;
   currency: string;
+  subtotalMinor: bigint;
+  vatMinor: bigint;
   totalMinor: bigint;
   paidMinor: bigint;
   referenceNo: string | null;
   notes: string | null;
   business: { name: string; legalName: string | null; taxId: string | null };
   contact: { name: string; company: string | null; address: string | null; phone: string | null; email: string | null; taxId: string | null };
-  lines: { description: string; quantity: string; unitPriceMinor: bigint; amountMinor: bigint }[];
+  lines: { description: string; quantity: string; unitPriceMinor: bigint; amountMinor: bigint; vatRateBp: number; vatMinor: bigint }[];
 }
 
 export interface InvoiceFormat {
@@ -27,6 +29,9 @@ export interface InvoiceFormat {
 const LABELS = {
   en: {
     SALE: "Invoice",
+    taxInvoice: "Tax invoice",
+    vat: "VAT",
+    subtotal: "Subtotal",
     BILL: "Bill",
     draft: "Draft",
     void: "Void",
@@ -47,6 +52,9 @@ const LABELS = {
   },
   "bn-BD": {
     SALE: "চালান",
+    taxInvoice: "কর চালান",
+    vat: "ভ্যাট",
+    subtotal: "উপমোট",
     BILL: "বিল",
     draft: "খসড়া",
     void: "বাতিল",
@@ -86,6 +94,9 @@ const toHtml = (doc: InvoiceDocument, format: InvoiceFormat) => {
   const businessParty = `<strong>${escapeHtml(doc.business.legalName ?? doc.business.name)}</strong>` +
     (doc.business.taxId ? `<br>${label.taxId}: ${escapeHtml(doc.business.taxId)}` : "");
 
+  const hasVat = doc.vatMinor > 0n;
+  const rate = (bp: number) => digits(`${(bp / 100).toString()}%`);
+  const title = doc.kind === "SALE" && hasVat ? label.taxInvoice : label[doc.kind];
   const stamp = doc.status === "DRAFT" ? label.draft : doc.status === "VOID" ? label.void : null;
 
   return `<!doctype html>
@@ -117,7 +128,7 @@ tr { page-break-inside: avoid; }
 <body>
 <div class="head">
   <div>
-    <h1>${label[doc.kind]}</h1>
+    <h1>${title}</h1>
     <div class="number">${escapeHtml(doc.number ?? "")}</div>
     ${stamp ? `<div class="stamp">${stamp}</div>` : ""}
   </div>
@@ -132,17 +143,18 @@ tr { page-break-inside: avoid; }
   <div><div class="caption">${label.billTo}</div>${doc.kind === "SALE" ? party(doc.contact) : businessParty}</div>
 </div>
 <table class="items">
-<thead><tr><th>${label.description}</th><th class="num">${label.quantity}</th><th class="num">${label.price}</th><th class="num">${label.amount}</th></tr></thead>
+<thead><tr><th>${label.description}</th><th class="num">${label.quantity}</th><th class="num">${label.price}</th>${hasVat ? `<th class="num">${label.vat}</th>` : ""}<th class="num">${label.amount}</th></tr></thead>
 <tbody>
 ${doc.lines
   .map(
     (line) =>
-      `<tr><td>${escapeHtml(line.description)}</td><td class="num">${digits(line.quantity)}</td><td class="num">${money(line.unitPriceMinor)}</td><td class="num">${money(line.amountMinor)}</td></tr>`,
+      `<tr><td>${escapeHtml(line.description)}</td><td class="num">${digits(line.quantity)}</td><td class="num">${money(line.unitPriceMinor)}</td>${hasVat ? `<td class="num">${line.vatRateBp > 0 ? `${rate(line.vatRateBp)} · ${money(line.vatMinor)}` : "—"}</td>` : ""}<td class="num">${money(line.amountMinor)}</td></tr>`,
   )
   .join("\n")}
 </tbody>
 </table>
 <table class="sum">
+  ${hasVat ? `<tr><td>${label.subtotal}</td><td class="num">${money(doc.subtotalMinor)}</td></tr><tr><td>${label.vat}</td><td class="num">${money(doc.vatMinor)}</td></tr>` : ""}
   <tr class="strong"><td>${label.total}</td><td class="num">${money(doc.totalMinor)}</td></tr>
   ${doc.paidMinor > 0n ? `<tr><td>${label.paid}</td><td class="num">${money(doc.paidMinor)}</td></tr>` : ""}
   ${doc.status !== "VOID" ? `<tr class="strong"><td>${label.balance}</td><td class="num">${money(doc.totalMinor - doc.paidMinor)}</td></tr>` : ""}

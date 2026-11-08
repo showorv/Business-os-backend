@@ -16,6 +16,8 @@ const line = z.object({
   quantity: z.string(),
   unitPriceMinor: z.string(),
   amountMinor: z.string(),
+  vatRateBp: z.number().int(),
+  vatMinor: z.string(),
   categoryId: z.uuid(),
   category: z.object({ id: z.uuid(), name: z.string(), nameBn: z.string().nullable() }),
 });
@@ -42,7 +44,10 @@ const summaryFields = {
   issueDate: z.string(),
   dueDate: z.string(),
   currency: z.string(),
+  subtotalMinor: z.string(),
+  vatMinor: z.string(),
   totalMinor: z.string(),
+  vatRecoverable: z.boolean(),
   paidMinor: z.string(),
   // What is still owed: total less paid, 0 once void.
   dueMinor: z.string(),
