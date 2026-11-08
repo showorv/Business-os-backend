@@ -147,6 +147,10 @@ export const ErrorCode = {
   CONTACT_KIND_MISMATCH: "CONTACT_KIND_MISMATCH",
   // VAT on an invoice needs the business to be VAT-registered (business settings).
   VAT_NOT_REGISTERED: "VAT_NOT_REGISTERED",
+  // Another item of this business already has this name (archived ones count; restore it instead).
+  ITEM_NAME_TAKEN: "ITEM_NAME_TAKEN",
+  // The item on an invoice line isn't this business's, or is archived. params.line says which line.
+  ITEM_NOT_USABLE: "ITEM_NOT_USABLE",
   // Sending invoices by email needs SMTP set up on the server.
   EMAIL_NOT_CONFIGURED: "EMAIL_NOT_CONFIGURED",
   // Only a sales invoice that is issued can be sent, and only somewhere with an address.

@@ -19,6 +19,8 @@ const line = z.object({
   vatRateBp: z.number().int(),
   vatMinor: z.string(),
   categoryId: z.uuid(),
+  itemId: z.uuid().nullable(),
+  unit: z.string().nullable(),
   category: z.object({ id: z.uuid(), name: z.string(), nameBn: z.string().nullable() }),
 });
 

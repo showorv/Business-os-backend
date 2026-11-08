@@ -44,6 +44,7 @@ export const resetDatabase = () =>
     prisma.$executeRawUnsafe(`DELETE FROM invoice_payments`),
     prisma.$executeRawUnsafe(`DELETE FROM invoice_lines`),
     prisma.$executeRawUnsafe(`DELETE FROM invoices`),
+    prisma.$executeRawUnsafe(`DELETE FROM items`),
     prisma.$executeRawUnsafe(`DELETE FROM transaction_attachments`),
     prisma.$executeRawUnsafe(`DELETE FROM transactions`),
     prisma.$executeRawUnsafe(`DELETE FROM documents`),

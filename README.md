@@ -16,7 +16,7 @@ Node.js, Express 5, TypeScript, PostgreSQL (Prisma 7) and Redis. This is a modul
 | **8** | **AI & RAG** | ✅ **Done**, see [what still needs you](#what-still-needs-you) |
 | 9 | Frontend | ✅ Done (in `Business_os_frontend`) |
 | 10 | Hardening & launch | ⬜ |
-| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.6 done) |
+| **11** | **SaaS: plans, payments, admin panel, invoices, VAT, stock** | 🟡 In progress (11.1 to 11.7 done) |
 
 ## Run it
 
@@ -235,8 +235,8 @@ requireAuth              who are you?
 | 11.4 | Customers and suppliers | ✅ Done |
 | 11.5 | Invoices, bills, baki and aging, PDF and email, posting to the books | ✅ Done |
 | 11.6 | VAT rates on lines and a monthly VAT summary (help with Mushak, not a full NBR filing) | ✅ Done |
-| 11.7 | Products and stock | ⬜ Next |
-| 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ |
+| 11.7 | Saved items for invoice and bill lines (no stock counting; see below why) | ✅ Done |
+| 11.8 | Launch basics: public home and pricing pages, terms and privacy, data export | ⬜ Next |
 
 ### Step 11.1: Plans and limits
 
@@ -436,6 +436,24 @@ Bangladesh VAT is usually 15%, with lower rates (10%, 7.5%, 5%) and 0% for some 
 **Database.** Migration `20261111090000_vat`: VAT columns on `invoices` and `invoice_lines`, the subtotal of every existing invoice set to its total, a check that the total is subtotal + VAT, and an index by date for the summary. Run `npm run db:deploy` on Neon.
 
 **How it was checked.** 7 new tests (`tests/vat.test.ts`): rounding half up; the posting rules balance with VAT on either side; a registered invoice posts to receivables, sales and VAT Payable; VAT refused when not registered, also at issue; a bill's VAT claimed into 1400 when registered and added to the expense when not; the summary by rate, leaving out drafts, voids and other months, with the right net and document list, and a bad period refused; the PDF; and the permission. All 780 tests pass.
+
+### Step 11.7: Saved items (no stock)
+
+**Why not products and stock.** This was planned as "products and stock". Counting stock properly means quantities on hand, goods received against bills, cost of goods sold (average or first-in-first-out), stock counts and adjustments, units and warehouses. That turns a money app into an ERP, and shops that need real stock control already use a stock or POS app. So this step saves the typing instead: a list of what the business sells or buys, picked on invoice and bill lines. Stock counting can be added later on top of it if users ask.
+
+**An item** has a name (one per business, whatever the letter case), an optional code or SKU, a unit (pcs, kg, gaj, hour...), a note, a usual selling price and a usual buying price (both before VAT, either can be empty), a VAT rate, and the income and expense categories it goes to. They live under `/businesses/:businessId/items`: add, list (by name; search by name or code; `use=SALE` lists those with a selling price, `use=BILL` those with a buying price; archived on request), one, change, and archive with `isActive: false`. Items are never deleted, so old lines keep their item.
+
+**On invoice and bill lines.** A line can carry `itemId` and `unit`. The item must be this business's and not archived (`ITEM_NOT_USABLE`, with the line number). The item only fills the line in: the description, price, VAT and category on the line are what count, and changing the item later doesn't touch lines already made. The PDF prints the unit after the quantity ("10 pcs").
+
+**What was sold and bought.** Each item comes with totals from issued, part-paid and paid invoices and bills (not drafts or voided ones): the quantity, the amount before VAT, and the number of lines.
+
+**Errors:** `ITEM_NAME_TAKEN` (409, with the other item's id and whether it is archived), `ITEM_NOT_USABLE`, `CATEGORY_TYPE_MISMATCH` (an income category in the expense box, or the other way).
+
+**Permissions and audit:** `finance.read` to see, `finance.write` to change. Audit entries `item.created`, `item.updated`, `item.archived`.
+
+**Database.** Migration `20261112090000_items`: the `items` table with row-level security, a unique name per business ignoring case, checks that prices aren't negative and the VAT rate is 0 to 100%, and `item_id` and `unit` on `invoice_lines`. Run `npm run db:deploy` on Neon.
+
+**How it was checked.** 4 new tests (`tests/items.test.ts`): saving with prices and categories; the same name in other letters refused, another business free to use it and unable to see it; a category on the wrong side refused; listing by name, search by code, `use`, archiving and showing archived; lines carrying the item and unit; sold and bought totals leaving out drafts and voids (12.5 sold over two invoices, 20 bought); an archived item, or another business's, refused on a line; the PDF; and the permissions. All 784 tests pass.
 
 ## What was built in Phase 8
 
@@ -1581,7 +1599,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4), invoices (11.5) and VAT (11.6, `20261111090000_vat`) migrations, all still to run.
+1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4), invoices (11.5), VAT (11.6, `20261111090000_vat`) and items (11.7, `20261112090000_items`) migrations, all still to run.
    Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.

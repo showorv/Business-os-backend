@@ -26,6 +26,9 @@ const line = z.object({
   categoryId: z.uuid(),
   // VAT in basis points: 1500 is 15%, 750 is 7.5%. Prices are before VAT.
   vatRateBp: z.number().int().min(0).max(10000).default(0),
+  // The saved item the line was filled from (11.7), and its unit, printed after the quantity.
+  itemId: z.uuid().nullable().optional(),
+  unit: textField(20).nullable().optional(),
 });
 
 const fields = {

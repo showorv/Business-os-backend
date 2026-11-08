@@ -14,6 +14,7 @@ import { nextSequence } from "../../utils/sequences.js";
 import { accountsService } from "../accounts/accounts.service.js";
 import { auditService } from "../audit/audit.service.js";
 import { categoriesService } from "../categories/categories.service.js";
+import { itemsService } from "../items/items.service.js";
 import { canPostToSoftClosed, journalsService } from "../journals/journals.service.js";
 import { ledgerAccountsService } from "../ledger-accounts/ledger-accounts.service.js";
 import type { BusinessContext } from "../members/members.interface.js";
@@ -115,6 +116,7 @@ const prepareLines = async (tx: Prisma.TransactionClient, businessId: string, ki
     if (category.type !== CATEGORY_TYPE[kind]) {
       throw new AppError(422, ErrorCode.CATEGORY_TYPE_MISMATCH, { line: index + 1, expected: CATEGORY_TYPE[kind] });
     }
+    if (line.itemId) await itemsService.assertUsable(tx, businessId, line.itemId, index + 1);
     const unitPriceMinor = BigInt(line.unitPriceMinor);
     const amountMinor = lineAmountMinor(line.quantity, unitPriceMinor);
     prepared.push({
@@ -127,6 +129,8 @@ const prepareLines = async (tx: Prisma.TransactionClient, businessId: string, ki
       vatRateBp: line.vatRateBp,
       vatMinor: lineVatMinor(amountMinor, line.vatRateBp),
       categoryId: line.categoryId,
+      itemId: line.itemId ?? null,
+      unit: line.unit ?? null,
     });
   }
   const subtotalMinor = prepared.reduce((sum, line) => sum + line.amountMinor, 0n);

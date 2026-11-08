@@ -11,6 +11,7 @@ import { businessesRouter } from "../modules/businesses/businesses.router.js";
 import { categoriesRouter } from "../modules/categories/categories.router.js";
 import { contactsRouter } from "../modules/contacts/contacts.router.js";
 import { invoicesRouter } from "../modules/invoices/invoices.router.js";
+import { itemsRouter } from "../modules/items/items.router.js";
 import { vatRouter } from "../modules/vat/vat.router.js";
 import { consolidatedRouter } from "../modules/consolidated/consolidated.router.js";
 import { documentsRouter } from "../modules/documents/documents.router.js";
@@ -62,6 +63,7 @@ const moduleRoutes = [
   { path: "/businesses/:businessId/contacts", router: contactsRouter },
   { path: "/businesses/:businessId/invoices", router: invoicesRouter },
   { path: "/businesses/:businessId/vat", router: vatRouter },
+  { path: "/businesses/:businessId/items", router: itemsRouter },
   { path: "/businesses/:businessId/documents", router: documentsRouter },
   { path: "/businesses/:businessId/transactions", router: transactionsRouter },
   { path: "/businesses/:businessId/ledger-accounts", router: ledgerAccountsRouter },

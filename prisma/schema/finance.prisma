@@ -93,6 +93,8 @@ model Category {
   budgetLines    BudgetLine[]
   statementRules StatementRule[]
   invoiceLines   InvoiceLine[]
+  incomeItems    Item[]          @relation("ItemIncomeCategory")
+  expenseItems   Item[]          @relation("ItemExpenseCategory")
 
   @@unique([businessId, type, name])
   @@map("categories")

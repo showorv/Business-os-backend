@@ -45,6 +45,7 @@ model Business {
   categories             Category[]
   contacts               Contact[]
   invoices               Invoice[]
+  items                  Item[]
   transactions           Transaction[]
   documents              Document[]
   sequences              BusinessSequence[]

@@ -8,6 +8,7 @@ import "./finance.docs.js";
 import "./contacts.docs.js";
 import "./invoices.docs.js";
 import "./vat.docs.js";
+import "./items.docs.js";
 import "./documents.docs.js";
 import "./accounting.docs.js";
 import "./analytics.docs.js";

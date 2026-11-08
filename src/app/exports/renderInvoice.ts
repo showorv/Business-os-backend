@@ -18,7 +18,7 @@ export interface InvoiceDocument {
   notes: string | null;
   business: { name: string; legalName: string | null; taxId: string | null };
   contact: { name: string; company: string | null; address: string | null; phone: string | null; email: string | null; taxId: string | null };
-  lines: { description: string; quantity: string; unitPriceMinor: bigint; amountMinor: bigint; vatRateBp: number; vatMinor: bigint }[];
+  lines: { description: string; quantity: string; unit?: string | null; unitPriceMinor: bigint; amountMinor: bigint; vatRateBp: number; vatMinor: bigint }[];
 }
 
 export interface InvoiceFormat {
@@ -148,7 +148,7 @@ tr { page-break-inside: avoid; }
 ${doc.lines
   .map(
     (line) =>
-      `<tr><td>${escapeHtml(line.description)}</td><td class="num">${digits(line.quantity)}</td><td class="num">${money(line.unitPriceMinor)}</td>${hasVat ? `<td class="num">${line.vatRateBp > 0 ? `${rate(line.vatRateBp)} · ${money(line.vatMinor)}` : "—"}</td>` : ""}<td class="num">${money(line.amountMinor)}</td></tr>`,
+      `<tr><td>${escapeHtml(line.description)}</td><td class="num">${digits(line.quantity)}${line.unit ? ` ${escapeHtml(line.unit)}` : ""}</td><td class="num">${money(line.unitPriceMinor)}</td>${hasVat ? `<td class="num">${line.vatRateBp > 0 ? `${rate(line.vatRateBp)} · ${money(line.vatMinor)}` : "—"}</td>` : ""}<td class="num">${money(line.amountMinor)}</td></tr>`,
   )
   .join("\n")}
 </tbody>

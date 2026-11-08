@@ -78,11 +78,17 @@ model InvoiceLine {
   vatMinor       BigInt  @default(0) @map("vat_minor")
   // An income category on an invoice, an expense category on a bill. It picks the ledger account.
   categoryId     String  @map("category_id") @db.Uuid
+  // The saved item the line was filled from (11.7), if any, and its unit (pcs, kg) as it was then.
+  itemId         String? @map("item_id") @db.Uuid
+  unit           String?
 
   invoice  Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id])
+  item     Item?    @relation(fields: [itemId], references: [id])
 
   @@unique([invoiceId, lineNo])
+  // How much of an item was sold or bought.
+  @@index([businessId, itemId])
   @@map("invoice_lines")
 }
 
@@ -111,4 +117,38 @@ model InvoicePayment {
 
   @@index([invoiceId, paidOn])
   @@map("invoice_payments")
+}
+
+// Step 11.7: what the business sells or buys, saved once so invoice and bill lines fill themselves in.
+// Prices and the VAT rate are only starting values; each line can still change them. No stock is
+// counted here.
+model Item {
+  id                 String   @id @default(uuid(7)) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  businessId         String   @map("business_id") @db.Uuid
+  name               String
+  // The business's own code or SKU, optional.
+  code               String?
+  // pcs, kg, gaj, hour... printed after the quantity.
+  unit               String?
+  description        String?
+  // Usual selling price and usual buying price, before VAT. Either can be left empty.
+  salePriceMinor     BigInt?  @map("sale_price_minor")
+  purchasePriceMinor BigInt?  @map("purchase_price_minor")
+  vatRateBp          Int      @default(0) @map("vat_rate_bp")
+  // The category a sale of it goes to, and the one a purchase of it goes to.
+  incomeCategoryId   String?  @map("income_category_id") @db.Uuid
+  expenseCategoryId  String?  @map("expense_category_id") @db.Uuid
+  isActive           Boolean  @default(true) @map("is_active")
+  createdBy          String   @map("created_by") @db.Uuid
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  business        Business      @relation(fields: [businessId], references: [id])
+  incomeCategory  Category?     @relation("ItemIncomeCategory", fields: [incomeCategoryId], references: [id])
+  expenseCategory Category?     @relation("ItemExpenseCategory", fields: [expenseCategoryId], references: [id])
+  invoiceLines    InvoiceLine[]
+
+  @@index([businessId, isActive, name])
+  @@map("items")
 }
