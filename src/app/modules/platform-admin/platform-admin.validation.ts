@@ -85,11 +85,27 @@ const couponParams = z.object({ couponId: z.uuid() });
 
 const paymentsQuery = z.object({
   status: z.enum(["PENDING", "PAID", "FAILED", "CANCELLED"]).optional(),
+  // Only payments made by hand that wait for the admin's check.
+  review: z.enum(["true"]).optional(),
   search: z.string().trim().max(100).optional(),
   ...page,
 });
 
 const activityQuery = z.object({ ...page });
+
+const paymentParams = z.object({ paymentId: z.uuid() });
+
+// Refusing a payment told by hand: the reason goes to the customer.
+const rejectPayment = z.object({ reason: z.string().trim().min(3).max(300) });
+
+// Money received outside the app (cash, or a transfer nobody told the app about), recorded by the admin.
+const recordPayment = z.object({
+  planKey: z.string().trim().min(1).max(40),
+  billingCycle: z.enum(["MONTHLY", "YEARLY"]),
+  amountMinor: minor.refine((value) => BigInt(value) > 0n, "More than nothing; to give a plan free, use Change plan"),
+  method: z.enum(["bkash", "nagad", "rocket", "bank", "cash", "other"]),
+  reference: z.string().trim().max(60).optional(),
+});
 
 export const platformAdminValidation = {
   workspacesQuery,
@@ -105,4 +121,7 @@ export const platformAdminValidation = {
   couponParams,
   paymentsQuery,
   activityQuery,
+  paymentParams,
+  rejectPayment,
+  recordPayment,
 };

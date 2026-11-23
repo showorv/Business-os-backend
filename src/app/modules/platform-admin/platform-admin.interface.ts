@@ -14,6 +14,9 @@ export type IUpdateCouponBody = z.infer<typeof v.updateCoupon>;
 export type ICouponParams = z.infer<typeof v.couponParams>;
 export type IPaymentsQuery = z.infer<typeof v.paymentsQuery>;
 export type IActivityQuery = z.infer<typeof v.activityQuery>;
+export type IPaymentParams = z.infer<typeof v.paymentParams>;
+export type IRejectPaymentBody = z.infer<typeof v.rejectPayment>;
+export type IRecordPaymentBody = z.infer<typeof v.recordPayment>;
 
 // Who is acting in the admin panel, for the audit log.
 export interface AdminActor {

@@ -21,24 +21,6 @@ export const publicPlan = z.object({
   aiDailyTokens: z.number(),
 });
 
-addPath("Billing", { method: "get", path: "/billing/plans", summary: "The plans on offer, for the pricing page. No sign-in needed", response: z.array(publicPlan), secured: false });
-addPath("Billing", {
-  method: "get",
-  path: "/billing/me",
-  summary: "My workspace's plan, what it uses, and whether I may change it",
-  response: z.object({
-    plan: publicPlan,
-    state: planState,
-    subscribedPlanKey: z.string(),
-    source: z.enum(["FREE", "TRIAL", "PAID", "GRANT"]),
-    billingCycle: z.enum(["MONTHLY", "YEARLY"]).nullable(),
-    endsAt: z.string().nullable(),
-    graceEndsAt: z.string().nullable(),
-    isOwner: z.boolean(),
-    usage: z.object({ businesses: z.number(), members: z.number(), storageBytes: z.string(), aiTokensToday: z.number() }),
-  }),
-});
-
 // One payment for a plan. Amounts are in poisha, as strings. Paid ones have a receipt number and period.
 export const payment = z.object({
   id: z.uuid(),
@@ -65,6 +47,27 @@ export const payment = z.object({
   billedTo: z.object({ name: z.string(), email: z.string() }).nullable(),
 });
 
+addPath("Billing", { method: "get", path: "/billing/plans", summary: "The plans on offer, for the pricing page. No sign-in needed", response: z.array(publicPlan), secured: false });
+addPath("Billing", {
+  method: "get",
+  path: "/billing/me",
+  summary: "My workspace's plan, what it uses, and whether I may change it",
+  response: z.object({
+    plan: publicPlan,
+    state: planState,
+    subscribedPlanKey: z.string(),
+    source: z.enum(["FREE", "TRIAL", "PAID", "GRANT"]),
+    billingCycle: z.enum(["MONTHLY", "YEARLY"]).nullable(),
+    endsAt: z.string().nullable(),
+    graceEndsAt: z.string().nullable(),
+    isOwner: z.boolean(),
+    // A payment made by hand that the admin hasn't checked yet.
+    pendingPayment: payment.nullable(),
+    usage: z.object({ businesses: z.number(), members: z.number(), storageBytes: z.string(), aiTokensToday: z.number() }),
+  }),
+});
+
+
 addPath("Billing", {
   method: "post",
   path: "/billing/checkout",
@@ -88,5 +91,42 @@ addPath("Billing", {
   summary: "The demo payment page's answer: paid, failed or cancelled. Only while the demo gateway is on; no money moves",
   params: billingValidation.paymentParams,
   body: billingValidation.demoOutcome,
+  response: payment,
+});
+
+const manualMethod = z.enum(["bkash", "nagad", "rocket", "bank"]);
+addPath("Billing", {
+  method: "get",
+  path: "/billing/pay-info",
+  summary: "How to pay: online, and/or by hand (bKash, Nagad, Rocket, bank) with the numbers to send to and a reference code. manual is null when paying by hand is off",
+  response: z.object({
+    online: z.boolean(),
+    manual: z
+      .object({
+        methods: z.array(z.object({ method: manualMethod, details: z.string() })),
+        whatsapp: z.string(),
+        phone: z.string(),
+        email: z.string(),
+        noteEn: z.string(),
+        noteBn: z.string(),
+        reference: z.string(),
+        reviewDays: z.number(),
+      })
+      .nullable(),
+  }),
+});
+addPath("Billing", {
+  method: "post",
+  path: "/billing/claims",
+  summary: "\"I've sent the money\": the method and transaction ID. Owner only, one waiting at a time (PAYMENT_CLAIM_OPEN). The admins are told; the plan starts once one approves. The price comes from the plan and any coupon",
+  body: billingValidation.claim,
+  status: 201,
+  response: payment,
+});
+addPath("Billing", {
+  method: "post",
+  path: "/billing/payments/{paymentId}/cancel",
+  summary: "Take back a payment told by hand that the admin hasn't checked yet",
+  params: billingValidation.paymentParams,
   response: payment,
 });

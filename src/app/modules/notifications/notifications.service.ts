@@ -37,6 +37,8 @@ const CHANNELS_BY_TYPE: Partial<Record<NotificationType, NotificationChannel[]>>
   [NotificationType.STATEMENT_IMPORT_FINISHED]: ["IN_APP"],
   [NotificationType.INVITATION]: ["EMAIL"],
   [NotificationType.PAYMENT_RECEIVED]: ["IN_APP", "EMAIL"],
+  [NotificationType.PAYMENT_CLAIM_SUBMITTED]: ["IN_APP", "EMAIL"],
+  [NotificationType.PAYMENT_REJECTED]: ["IN_APP", "EMAIL"],
   [NotificationType.PLAN_ENDING]: ["IN_APP", "EMAIL"],
   [NotificationType.PLAN_ENDED]: ["IN_APP", "EMAIL"],
   [NotificationType.PASSWORD_RESET]: ["EMAIL"],
@@ -57,6 +59,8 @@ const ALWAYS_SENT = new Set<string>([
   NotificationType.AUDIT_CHECK_FAILED,
   // A receipt, and warnings that the plan is about to stop, are part of paying, not optional news.
   NotificationType.PAYMENT_RECEIVED,
+  NotificationType.PAYMENT_CLAIM_SUBMITTED,
+  NotificationType.PAYMENT_REJECTED,
   NotificationType.PLAN_ENDING,
   NotificationType.PLAN_ENDED,
 ]);

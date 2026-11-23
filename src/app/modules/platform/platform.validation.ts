@@ -13,6 +13,17 @@ const updateSettings = z
       en: z.string().trim().max(500),
       bn: z.string().trim().max(500),
     }),
+    manualPayments: z.object({
+      enabled: z.boolean(),
+      methods: z
+        .array(z.object({ method: z.enum(["bkash", "nagad", "rocket", "bank"]), details: z.string().trim().min(3).max(300) }))
+        .max(8),
+      whatsapp: z.string().trim().max(30),
+      phone: z.string().trim().max(30),
+      email: z.union([z.literal(""), z.email().max(200)]),
+      noteEn: z.string().trim().max(500),
+      noteBn: z.string().trim().max(500),
+    }),
   })
   .partial()
   .refine((body) => Object.keys(body).length > 0, { message: "Send at least one setting" })

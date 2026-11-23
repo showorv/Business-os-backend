@@ -25,6 +25,9 @@ export const NotificationType = {
   INTEGRATION_SYNC_FAILING: "integration.sync_failing",
   INVITATION: "invitation",
   PAYMENT_RECEIVED: "billing.payment_received",
+  // Paying by hand: the admin hears a payment is waiting to be checked; the customer hears if it was refused.
+  PAYMENT_CLAIM_SUBMITTED: "billing.payment_claim_submitted",
+  PAYMENT_REJECTED: "billing.payment_rejected",
   PLAN_ENDING: "billing.plan_ending",
   PLAN_ENDED: "billing.plan_ended",
   PASSWORD_RESET: "auth.password_reset",

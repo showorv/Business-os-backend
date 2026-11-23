@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS: PlatformSettings = {
   aiEnabled: true,
   signupsEnabled: true,
   announcement: { active: false, tone: "info", en: "", bn: "" },
+  manualPayments: { enabled: false, methods: [], whatsapp: "", phone: "", email: "", noteEn: "", noteBn: "" },
 };
 
 // Read on almost every request, changed rarely. Each process keeps a copy for a few seconds; a change
@@ -24,6 +25,7 @@ const settings = async (): Promise<PlatformSettings> => {
     ...DEFAULT_SETTINGS,
     ...stored,
     announcement: { ...DEFAULT_SETTINGS.announcement, ...(stored.announcement ?? {}) },
+    manualPayments: { ...DEFAULT_SETTINGS.manualPayments, ...(stored.manualPayments ?? {}) },
   };
   cached = { value, at: Date.now() };
   return value;

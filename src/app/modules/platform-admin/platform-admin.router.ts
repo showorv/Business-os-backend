@@ -29,6 +29,10 @@ router.post("/coupons", validate({ body: v.createCoupon }), c.createCoupon);
 router.patch("/coupons/:couponId", validate({ params: v.couponParams, body: v.updateCoupon }), c.updateCoupon);
 
 router.get("/payments", validate({ query: v.paymentsQuery }), c.listPayments);
+// Payments made by hand: the admin checks the money arrived, then approves or rejects; or records one directly.
+router.post("/payments/:paymentId/approve", validate({ params: v.paymentParams }), c.approvePayment);
+router.post("/payments/:paymentId/reject", validate({ params: v.paymentParams, body: v.rejectPayment }), c.rejectPayment);
+router.post("/workspaces/:workspaceId/payments", validate({ params: v.workspaceParams, body: v.recordPayment }), c.recordPayment);
 
 router.get("/settings", c.getSettings);
 router.patch("/settings", validate({ body: platformValidation.updateSettings }), c.updateSettings);

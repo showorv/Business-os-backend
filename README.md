@@ -469,6 +469,36 @@ Only owners and admins (`business.manage`) can ask for it, with a recent two-ste
 
 **How it was checked.** 1 new test in `tests/exports.test.ts`: the workbook's sheet names in order, the business and a customer in it, `=Karim` kept as text, the journal's debits equal to its credits, and an accountant refused, not shown the export, and refused its link. 1 new test in `tests/platform-admin.test.ts` for `GET /platform/signup` following the admin's trial setting. All 785 tests pass.
 
+### Step 11.9: Paying by hand (bKash, Nagad, Rocket, bank)
+
+**Why.** There is no merchant account yet, so nobody can pay online. People still sign up free with the 14-day Pro trial. When they want to keep Pro, they send the money the way they already pay for things in Bangladesh, and tell us the transaction ID inside the app. An admin checks the money arrived and approves it. Approving goes through the same `settle()` as an online payment, so everything after it is the same: the receipt number `BOS-YYYY-NNNNNN`, the paid period (it starts after the trial or the current period, so no days are lost), the income in the admin panel, the "payment received" email, and the renewal reminders before it ends.
+
+**What the admin sets** (Platform settings, `manualPayments`): the ways to pay, up to 8, each a method (`bkash`, `nagad`, `rocket`, `bank`) with the number or account details; WhatsApp, phone and email for questions; a short note in English and in Bangla; and `enabled`, which offers paying by hand next to online payment. When there is no payment gateway (production without one), paying by hand is used on its own, whatever `enabled` says.
+
+**What the customer does.**
+- `GET /billing/pay-info` says whether online payment works and, if paying by hand is open, the ways to pay, the contacts, the note and the customer's own reference `BOS-XXXXXXXX` (from their account id) to write in the payment note.
+- `POST /billing/claims` with `planKey`, `billingCycle`, optional `couponCode`, `method` and `reference` (the transaction ID, 4 to 60 letters, digits, spaces and `. _ / # -`). Only the account owner can do it, 10 times an hour. The server sets the price, coupons included. It makes a waiting payment (gateway `manual`) that stays open 30 days, and tells every platform admin in the app and by email. Only one can wait at a time (`PAYMENT_CLAIM_OPEN`). A 100% coupon settles at once.
+- `POST /billing/payments/:paymentId/cancel` takes it back while it waits.
+- `GET /billing/me` now has `pendingPayment`, so the Plan page can show "We're checking your payment".
+
+**What the admin does.**
+- The overview shows `paymentsToReview`; `GET /admin/payments?review=true` lists the waiting ones. Payments now show the method, the transaction ID, the account id and the customer's reference, and search also finds a transaction ID.
+- `POST /admin/payments/:paymentId/approve`: the plan starts and the receipt is sent. A claim past its 30 days can still be approved.
+- `POST /admin/payments/:paymentId/reject` with a `reason` (3 to 300 characters): the payment is marked failed with that reason, and the customer is told in the app and by email, and can send it again.
+- `POST /admin/workspaces/:workspaceId/payments` records money received some other way, cash for example: plan, cycle, amount (any discount from the list price is kept), method (`bkash`, `nagad`, `rocket`, `bank`, `cash`, `other`) and an optional reference. It is paid at once, with a receipt.
+
+All of these need a platform admin with two-step sign-in, like the rest of the admin panel.
+
+**Errors:** `PAYMENT_CLAIM_OPEN` (409), `MANUAL_PAYMENTS_OFF` (409, when online payment works and paying by hand is switched off), `PAYMENT_NOT_MANUAL` (409, approving an online payment by hand).
+
+**Notifications:** `billing.payment_claim_submitted` (to admins) and `billing.payment_rejected` (to the customer), in English and Bangla, always sent.
+
+**Audit:** `billing.payment_claimed`, `platform.payment_approved`, `platform.payment_rejected`, `platform.payment_recorded`, plus the usual `billing.payment_paid`.
+
+**No migration.** The `payments` table already had the gateway, method, transaction reference, failure reason, expiry and who made it.
+
+**How it was checked.** 4 new tests (`tests/manual-payments.test.ts`): switching it on and off and what `pay-info` shows; the whole claim and approve path (the period starts after the trial, the receipt, income, the admin's notification, the audit); rejecting with a reason, sending again, taking it back, another account getting 404, and an online payment refused by hand; and recording a cash payment. All 789 tests pass.
+
 ## What was built in Phase 8
 
 **The goal:** ask questions about your business in English or Bangla, and get answers you can trust, with their source.
@@ -1614,7 +1644,7 @@ docker exec business_os_redis redis-cli flushall
 
 ## What still needs you
 
-1. **Update Neon:** run `npm run db:deploy`, then `npm run ledger:verify`. Phase 11 adds the plans migration (already run on 7 Nov 2026; every existing account is on Pro free with no end date) the payments (11.2), admin panel (11.3), contacts (11.4), invoices (11.5), VAT (11.6, `20261111090000_vat`) and items (11.7, `20261112090000_items`) migrations, all still to run.
+1. **Neon is up to date** (checked 10 Nov 2026 with `npx prisma migrate status`: all 15 migrations applied, through `20261112090000_items`). After a future step adds a migration, run `npm run db:deploy`, then `npm run ledger:verify`.
    Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.

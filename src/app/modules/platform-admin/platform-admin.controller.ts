@@ -7,8 +7,11 @@ import type {
   ICouponParams,
   ICreateCouponBody,
   ICreatePlanBody,
+  IPaymentParams,
   IPaymentsQuery,
   IPlanParams,
+  IRecordPaymentBody,
+  IRejectPaymentBody,
   ISetSubscriptionBody,
   ISuspendBody,
   IUpdateCouponBody,
@@ -41,6 +44,12 @@ const createCoupon: RequestHandler = async (req, res) => sendResponse(res, 201, 
 const updateCoupon: RequestHandler = async (req, res) =>
   sendResponse(res, 200, await service.updateCoupon(actor(req), (req.validated.params as ICouponParams).couponId, req.validated.body as IUpdateCouponBody, getRequestContext(req)));
 const listPayments: RequestHandler = async (req, res) => sendResponse(res, 200, await service.listPayments(query<IPaymentsQuery>(req)));
+const paymentId = (req: Request) => (req.validated.params as IPaymentParams).paymentId;
+const approvePayment: RequestHandler = async (req, res) => sendResponse(res, 200, await service.approvePayment(actor(req), paymentId(req), getRequestContext(req)));
+const rejectPayment: RequestHandler = async (req, res) =>
+  sendResponse(res, 200, await service.rejectPayment(actor(req), paymentId(req), req.validated.body as IRejectPaymentBody, getRequestContext(req)));
+const recordPayment: RequestHandler = async (req, res) =>
+  sendResponse(res, 201, await service.recordPayment(actor(req), (req.validated.params as IWorkspaceParams).workspaceId, req.validated.body as IRecordPaymentBody, getRequestContext(req)));
 const getSettings: RequestHandler = async (_req, res) => sendResponse(res, 200, await service.getSettings());
 const updateSettings: RequestHandler = async (req, res) => sendResponse(res, 200, await service.updateSettings(actor(req), req.validated.body as IUpdateSettingsBody, getRequestContext(req)));
 const activity: RequestHandler = async (req, res) => sendResponse(res, 200, await service.activity(query<IActivityQuery>(req)));
@@ -60,6 +69,9 @@ export const platformAdminController = {
   createCoupon,
   updateCoupon,
   listPayments,
+  approvePayment,
+  rejectPayment,
+  recordPayment,
   getSettings,
   updateSettings,
   activity,

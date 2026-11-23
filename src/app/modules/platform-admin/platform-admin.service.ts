@@ -4,7 +4,9 @@ import { AppError, ErrorCode } from "../../utils/errors.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
 import type { PlanState } from "../billing/billing.interface.js";
-import { billingService, FREE_PLAN, stateOf, whereState } from "../billing/billing.service.js";
+import { billingService, FREE_PLAN, payReference, stateOf, whereState } from "../billing/billing.service.js";
+import { NotificationType } from "../notifications/notifications.interface.js";
+import { notificationsService } from "../notifications/notifications.service.js";
 import type { IUpdateSettingsBody } from "../platform/platform.interface.js";
 import { platformService } from "../platform/platform.service.js";
 import type {
@@ -12,6 +14,8 @@ import type {
   ICreateCouponBody,
   ICreatePlanBody,
   IPaymentsQuery,
+  IRecordPaymentBody,
+  IRejectPaymentBody,
   ISetSubscriptionBody,
   IUpdateCouponBody,
   IUpdatePlanBody,
@@ -37,7 +41,7 @@ const audit = (
 const overview = async () => {
   const now = new Date();
   const { graceDays } = await platformService.settings();
-  const [workspaces, byState, users, newUsers, suspended, revenue, running] = await Promise.all([
+  const [workspaces, byState, users, newUsers, suspended, revenue, running, toReview] = await Promise.all([
     prisma.workspace.count(),
     Promise.all(STATES.map((state) => prisma.workspace.count({ where: whereState(state, now, graceDays) }))),
     prisma.user.count(),
@@ -51,6 +55,7 @@ const overview = async () => {
       WHERE status = 'PAID' AND paid_at >= date_trunc('month', now() AT TIME ZONE 'Asia/Dhaka') - interval '11 months'
       GROUP BY 1 ORDER BY 1`,
     prisma.workspaceSubscription.findMany({ where: { source: "PAID", endsAt: { gt: now } }, include: { plan: true } }),
+    prisma.payment.count({ where: waitingForReview(now) }),
   ]);
 
   // Monthly recurring revenue: each paid plan's price per month, a yearly one as a twelfth.
@@ -66,6 +71,7 @@ const overview = async () => {
     workspaces: { total: workspaces, suspended, byState: Object.fromEntries(STATES.map((state, index) => [state, byState[index]])) as Record<PlanState, number> },
     users: { total: users, last30Days: newUsers },
     revenue: { currency: "BDT", thisMonthMinor: months.at(-1)!.amountMinor, mrrMinor: mrr, payingWorkspaces: running.length, months },
+    paymentsToReview: toReview,
   };
 };
 
@@ -380,11 +386,13 @@ const updateCoupon = async (actorUserId: string, couponId: string, body: IUpdate
 const listPayments = async (query: IPaymentsQuery) => {
   const where: Prisma.PaymentWhereInput = {
     ...(query.status ? { status: query.status } : {}),
+    ...(query.review ? waitingForReview(new Date()) : {}),
     ...(query.search
       ? {
           OR: [
             { receiptNumber: { contains: query.search, mode: "insensitive" } },
             { couponCode: { contains: query.search, mode: "insensitive" } },
+            { gatewayRef: { contains: query.search, mode: "insensitive" } },
             { workspace: { owner: { email: { contains: query.search, mode: "insensitive" } } } },
           ],
         }
@@ -395,11 +403,117 @@ const listPayments = async (query: IPaymentsQuery) => {
     prisma.payment.count({ where }),
   ]);
   return pageOf(
-    rows.map((row) => ({ ...billingService.toPaymentDto(row), workspaceId: row.workspaceId })),
+    rows.map(adminPaymentDto),
     total,
     query.page,
     query.pageSize,
   );
+};
+
+// ---- Payments made by hand ----
+
+// Told by a customer, not yet checked, and not lapsed.
+const waitingForReview = (now: Date): Prisma.PaymentWhereInput => ({ gateway: "manual", status: "PENDING", expiresAt: { gt: now } });
+
+type AdminPaymentRow = Prisma.PaymentGetPayload<{ include: typeof billingService.paymentInclude }>;
+// The customer's reference code goes with each row, to match the money against the bKash or bank message.
+const adminPaymentDto = (row: AdminPaymentRow) => ({ ...billingService.toPaymentDto(row), workspaceId: row.workspaceId, payReference: payReference(row.workspaceId) });
+
+const loadPayment = (paymentId: string) => prisma.payment.findUnique({ where: { id: paymentId }, include: billingService.paymentInclude });
+
+const manualPayment = async (paymentId: string) => {
+  const payment = await loadPayment(paymentId);
+  if (!payment) throw new AppError(404, ErrorCode.NOT_FOUND);
+  if (payment.gateway !== "manual") throw new AppError(409, ErrorCode.PAYMENT_NOT_MANUAL);
+  if (payment.status !== "PENDING") throw new AppError(409, ErrorCode.PAYMENT_NOT_PENDING, { status: payment.status });
+  return payment;
+};
+
+// The money arrived: the payment settles like an online one (receipt, the plan's new period, revenue, reminders).
+const approvePayment = async (actorUserId: string, paymentId: string, context: RequestContext) => {
+  const payment = await manualPayment(paymentId);
+  // One the admin only got to after it lapsed still counts: the customer did pay.
+  await prisma.payment.updateMany({ where: { id: paymentId, status: "PENDING", expiresAt: { lte: new Date() } }, data: { expiresAt: new Date(Date.now() + 60_000) } });
+  const paid = await billingService.settle(paymentId, { status: "PAID" }, context, actorUserId);
+  await prisma.$transaction((tx) =>
+    audit(tx, actorUserId, context, {
+      action: "payment_approved",
+      workspaceId: payment.workspaceId,
+      entityType: "payment",
+      entityId: paymentId,
+      after: { receiptNumber: paid.receiptNumber, amountMinor: String(paid.amountMinor), method: paid.method, reference: paid.gatewayRef },
+    }),
+  );
+  return adminPaymentDto((await loadPayment(paymentId))!);
+};
+
+// The money didn't arrive (or was a different amount): the customer is told why and can tell us again.
+const rejectPayment = async (actorUserId: string, paymentId: string, body: IRejectPaymentBody, context: RequestContext) => {
+  const payment = await manualPayment(paymentId);
+  await billingService.settle(paymentId, { status: "FAILED", reason: body.reason }, context, actorUserId);
+  await prisma.$transaction((tx) =>
+    audit(tx, actorUserId, context, { action: "payment_rejected", workspaceId: payment.workspaceId, entityType: "payment", entityId: paymentId, after: { reason: body.reason } }),
+  );
+  await notificationsService.notifySafely([
+    {
+      type: NotificationType.PAYMENT_REJECTED,
+      userId: payment.createdBy,
+      workspaceId: payment.workspaceId,
+      params: {
+        planName: payment.plan.name,
+        amount: String(payment.amountMinor),
+        currency: payment.currency,
+        reference: payment.gatewayRef,
+        reason: body.reason,
+        paymentId,
+      },
+      entityType: "payment",
+      entityId: paymentId,
+      dedupeKey: `${NotificationType.PAYMENT_REJECTED}:${paymentId}`,
+    },
+  ]);
+  return adminPaymentDto((await loadPayment(paymentId))!);
+};
+
+// Money that came another way (cash in hand, or a transfer the customer didn't report): recorded here, it
+// counts and settles the same. The receipt goes to the account's owner.
+const recordPayment = async (actorUserId: string, workspaceId: string, body: IRecordPaymentBody, context: RequestContext) => {
+  const [workspace, plan] = await Promise.all([
+    prisma.workspace.findUnique({ where: { id: workspaceId }, select: { ownerUserId: true } }),
+    prisma.plan.findUnique({ where: { key: body.planKey } }),
+  ]);
+  if (!workspace?.ownerUserId) throw new AppError(404, ErrorCode.NOT_FOUND);
+  const list = plan ? (body.billingCycle === "YEARLY" ? plan.priceYearlyMinor : plan.priceMonthlyMinor) : 0n;
+  if (!plan || plan.key === FREE_PLAN || list <= 0n) throw new AppError(400, ErrorCode.PLAN_NOT_FOR_SALE, { planKey: body.planKey });
+  const amount = BigInt(body.amountMinor);
+  const created = await prisma.$transaction(async (tx) => {
+    const row = await tx.payment.create({
+      data: {
+        workspaceId,
+        planKey: plan.key,
+        billingCycle: body.billingCycle,
+        amountMinor: amount,
+        listAmountMinor: list,
+        discountMinor: amount < list ? list - amount : 0n,
+        currency: plan.currency,
+        gateway: "manual",
+        method: body.method,
+        gatewayRef: body.reference || null,
+        createdBy: workspace.ownerUserId!,
+        expiresAt: new Date(Date.now() + 60 * 60_000),
+      },
+    });
+    await audit(tx, actorUserId, context, {
+      action: "payment_recorded",
+      workspaceId,
+      entityType: "payment",
+      entityId: row.id,
+      after: { planKey: plan.key, billingCycle: body.billingCycle, amountMinor: body.amountMinor, method: body.method, reference: body.reference ?? null },
+    });
+    return row;
+  });
+  await billingService.settle(created.id, { status: "PAID" }, context, actorUserId);
+  return adminPaymentDto((await loadPayment(created.id))!);
 };
 
 // ---- Settings ----
@@ -463,6 +577,9 @@ export const platformAdminService = {
   createCoupon,
   updateCoupon,
   listPayments,
+  approvePayment,
+  rejectPayment,
+  recordPayment,
   getSettings,
   updateSettings,
   activity,

@@ -15,7 +15,19 @@ const settings = z.object({
   aiEnabled: z.boolean(),
   signupsEnabled: z.boolean(),
   announcement: z.object({ active: z.boolean(), tone: z.enum(["info", "warning"]), en: z.string(), bn: z.string() }),
+  manualPayments: z.object({
+    enabled: z.boolean(),
+    methods: z.array(z.object({ method: z.enum(["bkash", "nagad", "rocket", "bank"]), details: z.string() })),
+    whatsapp: z.string(),
+    phone: z.string(),
+    email: z.string(),
+    noteEn: z.string(),
+    noteBn: z.string(),
+  }),
 });
+
+// A payment in the admin's lists: with the account it belongs to and that account's reference code.
+const adminPayment = payment.extend({ workspaceId: z.uuid(), payReference: z.string() });
 
 const workspaceRow = z.object({
   id: z.uuid(),
@@ -108,6 +120,8 @@ addPath(T, {
       payingWorkspaces: z.number(),
       months: z.array(z.object({ month: z.string(), amountMinor: z.string(), payments: z.number() })),
     }),
+    // Payments told by hand, waiting for a check.
+    paymentsToReview: z.number(),
   }),
 });
 addPath(T, { method: "get", path: "/admin/workspaces", summary: "Accounts, newest first. Search by owner, account or business name; filter by plan state", query: v.workspacesQuery, response: paged(workspaceRow) });
@@ -148,7 +162,31 @@ addPath(T, { method: "patch", path: "/admin/plans/{planKey}", summary: "Change a
 addPath(T, { method: "get", path: "/admin/coupons", summary: "Coupons, newest first", response: z.array(coupon) });
 addPath(T, { method: "post", path: "/admin/coupons", summary: "Make a coupon: a percentage or an amount off", body: v.createCoupon, status: 201, response: coupon });
 addPath(T, { method: "patch", path: "/admin/coupons/{couponId}", summary: "Switch a coupon off or on, or change its limits", params: v.couponParams, body: v.updateCoupon, response: coupon });
-addPath(T, { method: "get", path: "/admin/payments", summary: "Every payment, newest first", query: v.paymentsQuery, response: paged(payment.extend({ workspaceId: z.uuid() })) });
+addPath(T, { method: "get", path: "/admin/payments", summary: "Every payment, newest first. review=true: only those told by hand and waiting for a check", query: v.paymentsQuery, response: paged(adminPayment) });
+addPath(T, {
+  method: "post",
+  path: "/admin/payments/{paymentId}/approve",
+  summary: "The money told by hand arrived: the payment settles like an online one (receipt, plan period, revenue)",
+  params: v.paymentParams,
+  response: adminPayment,
+});
+addPath(T, {
+  method: "post",
+  path: "/admin/payments/{paymentId}/reject",
+  summary: "The money told by hand didn't arrive: the customer is told the reason",
+  params: v.paymentParams,
+  body: v.rejectPayment,
+  response: adminPayment,
+});
+addPath(T, {
+  method: "post",
+  path: "/admin/workspaces/{workspaceId}/payments",
+  summary: "Record money received outside the app (cash, or a transfer nobody reported). It settles and counts like any payment",
+  params: v.workspaceParams,
+  body: v.recordPayment,
+  status: 201,
+  response: adminPayment,
+});
 addPath(T, { method: "get", path: "/admin/settings", summary: "Trial, grace days, AI switch, sign-ups and the announcement", response: settings });
 addPath(T, { method: "patch", path: "/admin/settings", summary: "Change some of the platform settings", body: platformValidation.updateSettings, response: settings });
 addPath(T, { method: "get", path: "/admin/activity", summary: "What platform admins changed, newest first", query: v.activityQuery, response: paged(activityRow) });

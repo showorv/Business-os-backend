@@ -10,7 +10,7 @@ import { auditService } from "../audit/audit.service.js";
 import { NotificationType } from "../notifications/notifications.interface.js";
 import { notificationsService } from "../notifications/notifications.service.js";
 import { platformService } from "../platform/platform.service.js";
-import type { Entitlements, ICheckoutBody, IDemoOutcomeBody, IPriceCheckBody, PaymentOutcome, PlanLimit, PlanState } from "./billing.interface.js";
+import type { Entitlements, ICheckoutBody, IClaimBody, IDemoOutcomeBody, IPriceCheckBody, PaymentOutcome, PlanLimit, PlanState } from "./billing.interface.js";
 
 export const FREE_PLAN = "free";
 // The trial's length and plan, and the grace days after a paid plan ends, are platform settings
@@ -188,7 +188,7 @@ const startOfTodayUtc = () => new Date(new Date().toISOString().slice(0, 10));
 
 // The signed-in person's own workspace: its plan, what's used, and whether they may change it.
 const mine = async (auth: { userId: string; workspaceId: string }) => {
-  const [current, workspace, businesses, seats, storage, tokens] = await Promise.all([
+  const [current, workspace, businesses, seats, storage, tokens, pending] = await Promise.all([
     entitlements(auth.workspaceId),
     prisma.workspace.findUniqueOrThrow({ where: { id: auth.workspaceId }, select: { ownerUserId: true } }),
     countBusinesses(prisma, auth.workspaceId),
@@ -198,6 +198,7 @@ const mine = async (auth: { userId: string; workspaceId: string }) => {
       where: { workspaceId: auth.workspaceId, createdAt: { gte: startOfTodayUtc() } },
       _sum: { promptTokens: true, completionTokens: true },
     }),
+    openClaim(auth.workspaceId),
   ]);
   const subscription = current.subscription;
   return {
@@ -210,6 +211,8 @@ const mine = async (auth: { userId: string; workspaceId: string }) => {
     endsAt: subscription?.endsAt ?? null,
     graceEndsAt: current.graceEndsAt,
     isOwner: workspace.ownerUserId === auth.userId,
+    // A payment made by hand that the admin hasn't checked yet.
+    pendingPayment: pending ? toPaymentDto(pending) : null,
     usage: {
       businesses,
       members: seats.size,
@@ -499,6 +502,136 @@ const completeDemo = async (auth: Auth, paymentId: string, body: IDemoOutcomeBod
   return getPayment(auth, paymentId);
 };
 
+// ---- Paying by hand (bKash, Nagad, Rocket, bank) ----
+// Until a merchant account exists, the customer sends money the usual way and tells us here. The admin
+// checks it arrived and approves it, which settles the payment exactly like an online one: a receipt, the
+// plan's new period, revenue and reminders.
+
+// How long a payment told by hand waits for the admin's check before it lapses.
+const CLAIM_DAYS = 30;
+
+export const METHOD_NAMES: Record<string, string> = { bkash: "bKash", nagad: "Nagad", rocket: "Rocket", bank: "Bank", cash: "Cash", other: "Other" };
+
+// A short code the customer writes in the payment's reference, so the admin can match the money to an account.
+export const payReference = (workspaceId: string) => `BOS-${workspaceId.replaceAll("-", "").slice(-8).toUpperCase()}`;
+
+// On whenever there's no online gateway, and next to one if the admin chose so.
+const manualOpen = async () => {
+  const { manualPayments } = await platformService.settings();
+  return { open: paymentGateway() === null || manualPayments.enabled, settings: manualPayments };
+};
+
+const openClaim = (workspaceId: string) =>
+  prisma.payment.findFirst({
+    where: { workspaceId, gateway: "manual", status: "PENDING", expiresAt: { gt: new Date() } },
+    include: paymentInclude,
+    orderBy: { createdAt: "desc" },
+  });
+
+// How to pay: online, by hand, or both. The numbers to send money to are only shown to people signed in.
+const payInfo = async (auth: Auth) => {
+  const { open, settings } = await manualOpen();
+  return {
+    online: paymentGateway() !== null,
+    manual: open
+      ? {
+          methods: settings.methods,
+          whatsapp: settings.whatsapp,
+          phone: settings.phone,
+          email: settings.email,
+          noteEn: settings.noteEn,
+          noteBn: settings.noteBn,
+          reference: payReference(auth.workspaceId),
+          reviewDays: CLAIM_DAYS,
+        }
+      : null,
+  };
+};
+
+// The customer has sent the money and tells us how. The price comes from the plan (and any coupon), never the browser.
+const claim = async (auth: Auth, body: IClaimBody, context: RequestContext) => {
+  await assertOwner(auth);
+  if (!(await manualOpen()).open) throw new AppError(409, ErrorCode.MANUAL_PAYMENTS_OFF);
+  const { plan, listAmountMinor, discountMinor, amountMinor, couponCode } = await priceFor(body.planKey, body.billingCycle, body.couponCode);
+  const current = await entitlements(auth.workspaceId);
+  if (current.state === "granted" && current.subscription?.endsAt === null && current.subscription.planKey === plan.key) {
+    throw new AppError(409, ErrorCode.BILLING_NOT_NEEDED);
+  }
+
+  const payment = await prisma.$transaction(async (tx) => {
+    // One at a time: the row lock stops two quick clicks making two.
+    await tx.$executeRaw`SELECT 1 FROM workspaces WHERE id = ${auth.workspaceId}::uuid FOR UPDATE`;
+    const open = await tx.payment.findFirst({ where: { workspaceId: auth.workspaceId, gateway: "manual", status: "PENDING", expiresAt: { gt: new Date() } }, select: { id: true } });
+    if (open) throw new AppError(409, ErrorCode.PAYMENT_CLAIM_OPEN, { paymentId: open.id });
+    const created = await tx.payment.create({
+      data: {
+        workspaceId: auth.workspaceId,
+        planKey: plan.key,
+        billingCycle: body.billingCycle,
+        amountMinor,
+        listAmountMinor,
+        discountMinor,
+        couponCode,
+        currency: plan.currency,
+        gateway: "manual",
+        method: body.method,
+        gatewayRef: body.reference,
+        createdBy: auth.userId,
+        expiresAt: new Date(Date.now() + CLAIM_DAYS * DAY_MS),
+      },
+    });
+    await auditService.record(tx, {
+      action: "billing.payment_claimed",
+      context,
+      workspaceId: auth.workspaceId,
+      actorUserId: auth.userId,
+      entityType: "payment",
+      entityId: created.id,
+      after: { planKey: plan.key, billingCycle: body.billingCycle, amountMinor: String(amountMinor), couponCode, method: body.method, reference: body.reference },
+    });
+    return created;
+  });
+
+  // A coupon that takes the whole price off: nothing to check.
+  if (amountMinor === 0n) {
+    await settle(payment.id, { status: "PAID" }, context, auth.userId);
+    return getPayment(auth, payment.id);
+  }
+
+  const [user, admins] = await Promise.all([
+    prisma.user.findUniqueOrThrow({ where: { id: auth.userId }, select: { name: true, email: true } }),
+    prisma.user.findMany({ where: { isPlatformAdmin: true }, select: { id: true } }),
+  ]);
+  await notificationsService.notifySafely(
+    admins.map((admin) => ({
+      type: NotificationType.PAYMENT_CLAIM_SUBMITTED,
+      userId: admin.id,
+      params: {
+        customer: `${user.name} (${user.email})`,
+        amount: String(amountMinor),
+        currency: plan.currency,
+        methodName: METHOD_NAMES[body.method] ?? body.method,
+        planName: plan.name,
+        reference: body.reference,
+        paymentId: payment.id,
+      },
+      entityType: "payment",
+      entityId: payment.id,
+      dedupeKey: `${NotificationType.PAYMENT_CLAIM_SUBMITTED}:${payment.id}:${admin.id}`,
+    })),
+  );
+  return getPayment(auth, payment.id);
+};
+
+// Changed their mind, or typed the wrong transaction ID: they take it back and can tell us again.
+const cancelClaim = async (auth: Auth, paymentId: string, context: RequestContext) => {
+  await assertOwner(auth);
+  const payment = await findOwnPayment(auth, paymentId);
+  if (payment.gateway !== "manual") throw new AppError(409, ErrorCode.PAYMENT_NOT_MANUAL);
+  await settle(paymentId, { status: "CANCELLED", reason: "cancelled" }, context, auth.userId);
+  return getPayment(auth, paymentId);
+};
+
 // ---- Reminders, run every morning by the worker ----
 
 // Each reminder's key includes the end date, so a renewed plan gets fresh reminders and none goes twice.
@@ -583,6 +716,9 @@ export const billingService = {
   getPayment,
   listPayments,
   completeDemo,
+  payInfo,
+  claim,
+  cancelClaim,
   sendPlanReminders,
   entitlements,
   startTrial,

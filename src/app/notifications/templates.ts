@@ -151,6 +151,30 @@ const TEMPLATES: Record<NotificationType, (f: Formatters) => Template> = {
     path: `/settings/plan/receipts/${f.text("paymentId")}`,
     global: true,
   }),
+  "billing.payment_claim_submitted": (f) => ({
+    en: {
+      subject: `Payment to check: ${f.money("amount")} by ${f.text("methodName")}`,
+      body: `${f.text("customer")} says they sent ${f.money("amount")} by ${f.text("methodName")} for ${f.text("planName")}, transaction ID ${f.text("reference")}. Check it arrived, then approve or reject it.`,
+    },
+    bn: {
+      subject: `যাচাই করার পেমেন্ট: ${f.text("methodName")}-এ ${f.money("amount")}`,
+      body: `${f.text("customer")} জানিয়েছেন তিনি ${f.text("planName")}-এর জন্য ${f.text("methodName")}-এ ${f.money("amount")} পাঠিয়েছেন, ট্রানজেকশন আইডি ${f.text("reference")}। টাকা এসেছে কিনা দেখে অনুমোদন বা বাতিল করুন।`,
+    },
+    path: "/admin/payments",
+    global: true,
+  }),
+  "billing.payment_rejected": (f) => ({
+    en: {
+      subject: "We couldn't confirm your payment",
+      body: `We couldn't confirm the ${f.money("amount")} you told us about for ${f.text("planName")} (transaction ID ${f.text("reference")}). Reason: ${f.text("reason")}. Please check the details and tell us again, or contact us.`,
+    },
+    bn: {
+      subject: "আপনার পেমেন্ট নিশ্চিত করা যায়নি",
+      body: `${f.text("planName")}-এর জন্য আপনার জানানো ${f.money("amount")} (ট্রানজেকশন আইডি ${f.text("reference")}) আমরা নিশ্চিত করতে পারিনি। কারণ: ${f.text("reason")}। তথ্য দেখে আবার জানান, অথবা আমাদের সাথে যোগাযোগ করুন।`,
+    },
+    path: "/settings/plan",
+    global: true,
+  }),
   "billing.plan_ending": (f) => {
     const stage = f.text("stage");
     const en =

@@ -20,6 +20,7 @@ export type IPlansQuery = z.infer<typeof billingValidation.plansQuery>;
 export type ICheckoutBody = z.infer<typeof billingValidation.checkout>;
 export type IPaymentParams = z.infer<typeof billingValidation.paymentParams>;
 export type IDemoOutcomeBody = z.infer<typeof billingValidation.demoOutcome>;
+export type IClaimBody = z.infer<typeof billingValidation.claim>;
 
 // What the gateway reported. Details are kept on the payment for the receipt and for support.
 export interface PaymentOutcome {

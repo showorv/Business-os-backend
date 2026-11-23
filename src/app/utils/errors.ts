@@ -130,6 +130,12 @@ export const ErrorCode = {
   PAYMENT_EXPIRED: "PAYMENT_EXPIRED",
   // The demo payment page is switched off (in production, or another gateway is in use).
   PAYMENT_GATEWAY_UNAVAILABLE: "PAYMENT_GATEWAY_UNAVAILABLE",
+  // Paying by hand (bKash, Nagad, bank): one payment waits for the admin's check at a time.
+  PAYMENT_CLAIM_OPEN: "PAYMENT_CLAIM_OPEN",
+  // The admin has switched paying by hand off while online payment works.
+  MANUAL_PAYMENTS_OFF: "MANUAL_PAYMENTS_OFF",
+  // Only a payment someone made by hand is approved or rejected by the admin; online ones settle themselves.
+  PAYMENT_NOT_MANUAL: "PAYMENT_NOT_MANUAL",
   // A coupon that doesn't exist, has ended, is used up or isn't for this plan. params.reason says which.
   COUPON_INVALID: "COUPON_INVALID",
   // Invoices and bills (11.5). Only a draft can be changed or deleted.

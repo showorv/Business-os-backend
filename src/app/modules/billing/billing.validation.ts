@@ -19,4 +19,15 @@ const demoOutcome = z.object({
   method: z.enum(["bkash", "nagad", "card"]).optional(),
 });
 
-export const billingValidation = { plansQuery, checkout, priceCheck, paymentParams, demoOutcome };
+// "I've sent the money": how, and the transaction ID the bKash, Nagad, Rocket or bank message gave.
+const claim = checkout.extend({
+  method: z.enum(["bkash", "nagad", "rocket", "bank"]),
+  reference: z
+    .string()
+    .trim()
+    .min(4)
+    .max(60)
+    .regex(/^[\p{L}\p{N} ._/#-]+$/u, "Letters, digits, spaces and . _ / # - only"),
+});
+
+export const billingValidation = { plansQuery, checkout, priceCheck, paymentParams, demoOutcome, claim };
