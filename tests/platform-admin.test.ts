@@ -68,6 +68,8 @@ describe("the admin from .env", () => {
     const user = await prisma.user.findUniqueOrThrow({ where: { email }, include: { workspaces: true } });
     expect(user).toMatchObject({ name: "Owner Admin", isPlatformAdmin: true });
     expect(user.workspaces).toHaveLength(1);
+    // An admin never pays: Pro, given free with no end date, not a trial.
+    expect(await prisma.workspaceSubscription.findUniqueOrThrow({ where: { workspaceId: user.workspaces[0]!.workspaceId } })).toMatchObject({ planKey: "pro", source: "GRANT", endsAt: null });
     expect(await prisma.auditLog.count({ where: { action: "platform.admin_created", entityId: user.id } })).toBe(1);
 
     // Restarting with another password in .env doesn't change it.
@@ -80,6 +82,10 @@ describe("the admin from .env", () => {
     const someone = await registerUser();
     expect(await platformAdminService.ensureEnvAdmin({ email: someone.email, name: "x" })).toBe("granted");
     expect((await prisma.user.findUniqueOrThrow({ where: { id: someone.userId } })).isPlatformAdmin).toBe(true);
+    const workspace = await prisma.workspace.findFirstOrThrow({ where: { ownerUserId: someone.userId }, include: { subscription: true } });
+    expect(workspace.subscription).toMatchObject({ planKey: "pro", source: "GRANT", endsAt: null, note: "Platform admin" });
+    // A second start changes nothing more.
+    expect(await platformAdminService.giveAdminPlan(someone.userId)).toBe(0);
     expect(await platformAdminService.ensureEnvAdmin({ email: someone.email, name: "x" })).toBe("already");
 
     const nobody = uniqueEmail();

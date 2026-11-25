@@ -2,6 +2,7 @@
 //   npm run admin:grant -- someone@example.com
 //   npm run admin:revoke -- someone@example.com
 import { auditService } from "../app/modules/audit/audit.service.js";
+import { platformAdminService } from "../app/modules/platform-admin/platform-admin.service.js";
 import { logger } from "../lib/logger.js";
 import { prisma } from "../lib/prisma.js";
 import { redis } from "../lib/redis.js";
@@ -28,6 +29,8 @@ if (!user) {
       after: { email },
     });
   });
+  // An admin never pays: their own workspace gets the paid plan free, with no end date.
+  if (mode === "grant") await platformAdminService.giveAdminPlan(user.id);
   logger.info({ email }, mode === "grant" ? "now a platform admin" : "no longer a platform admin");
 }
 

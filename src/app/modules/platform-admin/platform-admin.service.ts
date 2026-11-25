@@ -567,6 +567,37 @@ const activity = async (query: IActivityQuery) => {
   return pageOf(items, total, query.page, query.pageSize);
 };
 
+// A platform admin runs the platform and never pays: the workspaces they own get the paid plan (the trial
+// plan, normally Pro) given free with no end date, instead of a trial that runs out. A workspace already
+// on a paid plan or a gift with no end is left alone. Returns how many were changed.
+export const giveAdminPlan = async (userId: string) => {
+  const { trialPlanKey } = await platformService.settings();
+  const planKey = trialPlanKey !== FREE_PLAN && (await prisma.plan.findUnique({ where: { key: trialPlanKey } })) ? trialPlanKey : "pro";
+  const owned = await prisma.workspace.findMany({ where: { ownerUserId: userId }, select: { id: true, subscription: true } });
+  let changed = 0;
+  for (const { id: workspaceId, subscription: before } of owned) {
+    const settled = before && ((before.source === "GRANT" && before.endsAt === null && before.planKey !== FREE_PLAN) || before.source === "PAID");
+    if (settled) continue;
+    const data = { planKey, source: "GRANT" as const, billingCycle: null, endsAt: null, note: "Platform admin", grantedBy: null };
+    await prisma.$transaction(async (tx) => {
+      await tx.workspaceSubscription.upsert({ where: { workspaceId }, create: { workspaceId, ...data }, update: data });
+      await auditService.record(tx, {
+        action: "platform.subscription_changed",
+        context: null,
+        actorVia: "system",
+        workspaceId,
+        entityType: "workspace",
+        entityId: workspaceId,
+        before: before ? { planKey: before.planKey, source: before.source, endsAt: before.endsAt, note: before.note } : null,
+        after: { planKey, source: "GRANT", endsAt: null, note: data.note },
+      });
+    });
+    await billingService.invalidateWorkspaceContexts(workspaceId);
+    changed += 1;
+  }
+  return changed;
+};
+
 // The admin named in .env (PLATFORM_ADMIN_EMAIL), run when the API starts. A new account is made with
 // PLATFORM_ADMIN_PASSWORD, its own workspace and the usual trial, like a sign-up. An existing account is
 // only marked as an admin: its password is never changed here, so a password changed in the app stays.
@@ -587,10 +618,16 @@ export const ensureEnvAdmin = async (
     return "granted";
   };
 
+  const withPlan = async <T>(outcome: T) => {
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (user && (await giveAdminPlan(user.id)) > 0) logger.info({ email }, "platform admin from .env: own workspace given the paid plan free");
+    return outcome;
+  };
+
   const existing = await grant();
   if (existing) {
     if (existing === "granted") logger.info({ email }, "platform admin from .env: made an admin");
-    return existing;
+    return withPlan(existing);
   }
   if (!admin.password) {
     logger.warn({ email }, "platform admin from .env: no account with this email, and PLATFORM_ADMIN_PASSWORD is empty, so none was made");
@@ -606,15 +643,16 @@ export const ensureEnvAdmin = async (
     });
   } catch (error) {
     // Another copy of the API made it at the same moment.
-    if ((error as { code?: string }).code === "P2002") return (await grant()) ?? "already";
+    if ((error as { code?: string }).code === "P2002") return withPlan((await grant()) ?? "already");
     throw error;
   }
   logger.info({ email }, "platform admin from .env: account created");
-  return "created";
+  return withPlan("created" as const);
 };
 
 export const platformAdminService = {
   ensureEnvAdmin,
+  giveAdminPlan,
   overview,
   listWorkspaces,
   getWorkspace,

@@ -534,6 +534,14 @@ After the first start you can empty `PLATFORM_ADMIN_PASSWORD`; the admin stays. 
 
 **No migration.** **How it was checked.** 2 new tests in `tests/platform-admin.test.ts`: the account is created, can sign in and open the admin panel, has its workspace and audit entry, and a second start with another password changes nothing; an existing account is made an admin; no account without a password; nothing without an email. The real server was also started once with an admin in the environment: it logged "account created" with the email and no password. All 791 tests pass.
 
+### Step 11.13: The admin gets Pro free, not a trial
+
+**Why.** The admin made from `.env` was created like a sign-up, so its own workspace started the 14-day Pro trial and would drop to Free, with upgrade prompts. The person running the platform shouldn't pay or count down.
+
+**What changed.** `giveAdminPlan` in the platform-admin service gives every workspace the admin owns the paid plan (the trial plan, normally Pro) free with **no end date** (source `GRANT`, note "Platform admin"). It runs when the API makes or finds the `.env` admin on start, and in `npm run admin:grant`. A workspace already paid for, or already given a plan with no end, is left alone, so it runs only once. Audit entry `platform.subscription_changed`. An admin whose account already exists gets it on the next start of the API.
+
+**No migration.** **How it was checked.** The `.env` admin tests now also check the workspace is Pro, given free, with no end date, and that a second run changes nothing. All 791 tests pass.
+
 ## What was built in Phase 8
 
 **The goal:** ask questions about your business in English or Bangla, and get answers you can trust, with their source.
