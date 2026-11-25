@@ -1,6 +1,7 @@
 import * as Sentry from "@sentry/node";
 import app from "./app.js";
 import { env } from "./app/config/env.config.js";
+import { platformAdminService } from "./app/modules/platform-admin/platform-admin.service.js";
 import { shutdownTelemetry } from "./instrument.js";
 import { logger } from "./lib/logger.js";
 import { prisma } from "./lib/prisma.js";
@@ -13,6 +14,9 @@ await prisma.$connect();
 // Local MinIO starts empty. Elsewhere the bucket already exists, so a failure here is only logged
 // and /health/ready reports it.
 await ensureBucket().catch((error) => logger.error({ err: error }, "storage bucket check failed"));
+
+// The admin named in .env. A problem here is logged and the API still starts.
+await platformAdminService.ensureEnvAdmin().catch((error) => logger.error({ err: error }, "platform admin from .env failed"));
 
 const server = app.listen(env.PORT, () => {
   logger.info({ port: env.PORT, env: env.NODE_ENV }, "API listening");

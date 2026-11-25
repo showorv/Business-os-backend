@@ -1,5 +1,8 @@
+import bcrypt from "bcrypt";
 import { Prisma } from "../../../generated/prisma/client.js";
+import { logger } from "../../../lib/logger.js";
 import { prisma } from "../../../lib/prisma.js";
+import { env } from "../../config/env.config.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import type { RequestContext } from "../../utils/requestContext.js";
 import { auditService } from "../audit/audit.service.js";
@@ -9,6 +12,7 @@ import { NotificationType } from "../notifications/notifications.interface.js";
 import { notificationsService } from "../notifications/notifications.service.js";
 import type { IUpdateSettingsBody } from "../platform/platform.interface.js";
 import { platformService } from "../platform/platform.service.js";
+import { usersService } from "../users/users.service.js";
 import type {
   IActivityQuery,
   ICreateCouponBody,
@@ -563,7 +567,54 @@ const activity = async (query: IActivityQuery) => {
   return pageOf(items, total, query.page, query.pageSize);
 };
 
+// The admin named in .env (PLATFORM_ADMIN_EMAIL), run when the API starts. A new account is made with
+// PLATFORM_ADMIN_PASSWORD, its own workspace and the usual trial, like a sign-up. An existing account is
+// only marked as an admin: its password is never changed here, so a password changed in the app stays.
+// Never logs the password.
+export const ensureEnvAdmin = async (
+  admin: { email?: string; password?: string; name: string } = { email: env.PLATFORM_ADMIN_EMAIL, password: env.PLATFORM_ADMIN_PASSWORD, name: env.PLATFORM_ADMIN_NAME },
+): Promise<"none" | "created" | "granted" | "already" | "no_password"> => {
+  if (!admin.email) return "none";
+  const email = admin.email;
+  const grant = async (): Promise<"granted" | "already" | null> => {
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true, isPlatformAdmin: true } });
+    if (!user) return null;
+    if (user.isPlatformAdmin) return "already";
+    await prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: user.id }, data: { isPlatformAdmin: true } });
+      await auditService.record(tx, { action: "platform.admin_granted", context: null, actorVia: "system", entityType: "user", entityId: user.id, after: { email, from: "env" } });
+    });
+    return "granted";
+  };
+
+  const existing = await grant();
+  if (existing) {
+    if (existing === "granted") logger.info({ email }, "platform admin from .env: made an admin");
+    return existing;
+  }
+  if (!admin.password) {
+    logger.warn({ email }, "platform admin from .env: no account with this email, and PLATFORM_ADMIN_PASSWORD is empty, so none was made");
+    return "no_password";
+  }
+
+  const passwordHash = await bcrypt.hash(admin.password, env.BCRYPT_COST);
+  try {
+    await prisma.$transaction(async (tx) => {
+      const { user, workspaceId } = await usersService.createWithWorkspace(tx, { email, name: admin.name, passwordHash });
+      await tx.user.update({ where: { id: user.id }, data: { isPlatformAdmin: true } });
+      await auditService.record(tx, { action: "platform.admin_created", context: null, actorVia: "system", workspaceId, entityType: "user", entityId: user.id, after: { email, from: "env" } });
+    });
+  } catch (error) {
+    // Another copy of the API made it at the same moment.
+    if ((error as { code?: string }).code === "P2002") return (await grant()) ?? "already";
+    throw error;
+  }
+  logger.info({ email }, "platform admin from .env: account created");
+  return "created";
+};
+
 export const platformAdminService = {
+  ensureEnvAdmin,
   overview,
   listWorkspaces,
   getWorkspace,

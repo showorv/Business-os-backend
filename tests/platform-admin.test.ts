@@ -1,5 +1,6 @@
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { billingService } from "../src/app/modules/billing/billing.service.js";
+import { platformAdminService } from "../src/app/modules/platform-admin/platform-admin.service.js";
 import { platformService } from "../src/app/modules/platform/platform.service.js";
 import { prisma } from "../src/lib/prisma.js";
 import { useFakeModel } from "./helpers/ai.js";
@@ -49,6 +50,42 @@ describe("who can open the admin panel", () => {
     const ok = await as(someone).get("/admin/overview");
     expect(ok.status).toBe(200);
     expect(ok.body.data.workspaces.total).toBeGreaterThan(0);
+  });
+});
+
+describe("the admin from .env", () => {
+  const login = (email: string, password: string) => api().post(`${API}/auth/login`).send({ email, password });
+
+  it("creates the account on start, then leaves its password alone", async () => {
+    const email = uniqueEmail();
+    const password = "first-admin-pass";
+    expect(await platformAdminService.ensureEnvAdmin({ email, password, name: "Owner Admin" })).toBe("created");
+
+    const signedIn = await login(email, password);
+    expect(signedIn.status).toBe(200);
+    const token = signedIn.body.data.accessToken as string;
+    expect((await api().get(`${API}/admin/overview`).set("Authorization", `Bearer ${token}`)).status).toBe(200);
+    const user = await prisma.user.findUniqueOrThrow({ where: { email }, include: { workspaces: true } });
+    expect(user).toMatchObject({ name: "Owner Admin", isPlatformAdmin: true });
+    expect(user.workspaces).toHaveLength(1);
+    expect(await prisma.auditLog.count({ where: { action: "platform.admin_created", entityId: user.id } })).toBe(1);
+
+    // Restarting with another password in .env doesn't change it.
+    expect(await platformAdminService.ensureEnvAdmin({ email, password: "another-password", name: "Owner Admin" })).toBe("already");
+    expect((await login(email, password)).status).toBe(200);
+    expect((await login(email, "another-password")).status).toBe(401);
+  });
+
+  it("makes an existing account an admin, and does nothing without an email or a password", async () => {
+    const someone = await registerUser();
+    expect(await platformAdminService.ensureEnvAdmin({ email: someone.email, name: "x" })).toBe("granted");
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: someone.userId } })).isPlatformAdmin).toBe(true);
+    expect(await platformAdminService.ensureEnvAdmin({ email: someone.email, name: "x" })).toBe("already");
+
+    const nobody = uniqueEmail();
+    expect(await platformAdminService.ensureEnvAdmin({ email: nobody, name: "x" })).toBe("no_password");
+    expect(await prisma.user.count({ where: { email: nobody } })).toBe(0);
+    expect(await platformAdminService.ensureEnvAdmin({ name: "x" })).toBe("none");
   });
 });
 

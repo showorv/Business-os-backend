@@ -82,6 +82,20 @@ const envSchema = z
       .default("false")
       .transform((value) => value === "true"),
 
+    // The platform admin, made when the API starts. If the account doesn't exist it is created with
+    // this password; if it does, it is only marked as an admin and its password is left alone.
+    PLATFORM_ADMIN_EMAIL: z.preprocess(emptyToUndefined, z.string().trim().toLowerCase().max(254).pipe(z.email()).optional()),
+    PLATFORM_ADMIN_PASSWORD: z.preprocess(
+      emptyToUndefined,
+      z
+        .string()
+        .normalize("NFC")
+        .min(10)
+        .refine((value) => Buffer.byteLength(value, "utf8") <= 72, "must be at most 72 bytes")
+        .optional(),
+    ),
+    PLATFORM_ADMIN_NAME: z.preprocess(emptyToUndefined, z.string().trim().min(1).max(100).default("Platform Admin")),
+
     SENTRY_DSN: optionalUrl,
     OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
   })
@@ -91,6 +105,9 @@ const envSchema = z
     }
     if (Boolean(value.VAPID_PUBLIC_KEY) !== Boolean(value.VAPID_PRIVATE_KEY)) {
       ctx.addIssue({ code: "custom", path: ["VAPID_PRIVATE_KEY"], message: "set both VAPID keys, or neither" });
+    }
+    if (value.PLATFORM_ADMIN_PASSWORD && !value.PLATFORM_ADMIN_EMAIL) {
+      ctx.addIssue({ code: "custom", path: ["PLATFORM_ADMIN_EMAIL"], message: "set it too, or remove PLATFORM_ADMIN_PASSWORD" });
     }
     if (value.NODE_ENV === "production" && value.BCRYPT_COST < 12) {
       ctx.addIssue({ code: "custom", path: ["BCRYPT_COST"], message: "must be at least 12 in production" });

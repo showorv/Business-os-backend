@@ -509,6 +509,31 @@ All of these need a platform admin, like the rest of the admin panel.
 
 **No migration.** **How it was checked.** The admin test now checks an admin gets in without two-step; all 789 tests pass.
 
+### Step 11.11: The admin comes from .env
+
+**Why.** Making the admin meant signing up, then running a command in a terminal on the server. Now it is set in `.env` and made when the API starts.
+
+**How to use it.** In the server's `.env`:
+```
+PLATFORM_ADMIN_EMAIL=you@example.com
+PLATFORM_ADMIN_PASSWORD=a-long-password-only-for-this
+PLATFORM_ADMIN_NAME=Your Name          (optional, "Platform Admin" if empty)
+```
+Restart the API, then sign in with that email and password and open `/admin`.
+
+**What happens on each start** (`ensureEnvAdmin` in the platform-admin service, called from `server.ts`):
+- **No account with that email:** one is created with that password, its own workspace and the usual Pro trial, like a sign-up, and marked as admin. Audit entry `platform.admin_created`.
+- **The account exists but isn't an admin:** it is made one. Audit entry `platform.admin_granted`.
+- **It is already an admin:** nothing changes.
+- **The password is never changed for an existing account,** so a password you change in the app stays changed after a restart. Changing `PLATFORM_ADMIN_PASSWORD` later does nothing; use *Forgot password* instead.
+- No account and no password: a warning is logged and nothing is made.
+- The password is never logged. A problem here is logged, and the API still starts.
+- If the password is shorter than 10 characters or longer than 72 bytes, or the password is set without the email, the API refuses to start and says why, like any other wrong setting.
+
+After the first start you can empty `PLATFORM_ADMIN_PASSWORD`; the admin stays. Taking someone's admin away is still `npm run admin:revoke -- email`. Removing them from `.env` doesn't take it away.
+
+**No migration.** **How it was checked.** 2 new tests in `tests/platform-admin.test.ts`: the account is created, can sign in and open the admin panel, has its workspace and audit entry, and a second start with another password changes nothing; an existing account is made an admin; no account without a password; nothing without an email. The real server was also started once with an admin in the environment: it logged "account created" with the email and no password. All 791 tests pass.
+
 ## What was built in Phase 8
 
 **The goal:** ask questions about your business in English or Bangla, and get answers you can trust, with their source.
@@ -1655,7 +1680,7 @@ docker exec business_os_redis redis-cli flushall
 ## What still needs you
 
 1. **Neon is up to date** (checked 10 Nov 2026 with `npx prisma migrate status`: all 15 migrations applied, through `20261112090000_items`). After a future step adds a migration, run `npm run db:deploy`, then `npm run ledger:verify`.
-   Then make yourself the platform admin: sign up in the app, then on the server, in the backend folder, run `npm run admin:grant -- your-email` (or `node dist/scripts/platform-admin.js grant your-email` if `tsx` isn't installed there).
+   Then make yourself the platform admin: put `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` in the server's `.env` and restart the API (step 11.11). `npm run admin:grant -- your-email` still works too.
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
 4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
