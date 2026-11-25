@@ -38,18 +38,14 @@ afterEach(async () => {
 });
 
 describe("who can open the admin panel", () => {
-  it("only a platform admin with two-step verification on", async () => {
+  it("only a platform admin, with or without two-step verification", async () => {
     const someone = await registerUser();
     const denied = await as(someone).get("/admin/overview");
     expect(denied.status).toBe(403);
     expect(denied.body.error.code).toBe("PLATFORM_ADMIN_ONLY");
 
     await prisma.user.update({ where: { id: someone.userId }, data: { isPlatformAdmin: true } });
-    const noMfa = await as(someone).get("/admin/overview");
-    expect(noMfa.body.error.code).toBe("PLATFORM_ADMIN_MFA_REQUIRED");
     expect((await as(someone).get("/users/me")).body.data.isPlatformAdmin).toBe(true);
-
-    await enableMfa(someone);
     const ok = await as(someone).get("/admin/overview");
     expect(ok.status).toBe(200);
     expect(ok.body.data.workspaces.total).toBeGreaterThan(0);

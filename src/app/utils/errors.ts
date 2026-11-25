@@ -163,7 +163,6 @@ export const ErrorCode = {
   INVOICE_NOT_SENDABLE: "INVOICE_NOT_SENDABLE",
   // The platform admin panel: only for platform admins, and only with two-step verification on.
   PLATFORM_ADMIN_ONLY: "PLATFORM_ADMIN_ONLY",
-  PLATFORM_ADMIN_MFA_REQUIRED: "PLATFORM_ADMIN_MFA_REQUIRED",
   // The platform admin suspended this account, so its businesses can't be opened. Nothing was deleted.
   WORKSPACE_SUSPENDED: "WORKSPACE_SUSPENDED",
   // The platform admin switched the AI assistant off for everyone for now.

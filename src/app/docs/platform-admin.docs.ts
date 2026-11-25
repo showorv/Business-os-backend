@@ -109,7 +109,7 @@ addPath(T, {
 addPath(T, {
   method: "get",
   path: "/admin/overview",
-  summary: "Accounts by plan state, people, and money received. Platform admins with two-step verification only, like every /admin route",
+  summary: "Accounts by plan state, people, and money received. Platform admins only, like every /admin route",
   response: z.object({
     workspaces: z.object({ total: z.number(), suspended: z.number(), byState: z.record(planState, z.number()) }),
     users: z.object({ total: z.number(), last30Days: z.number() }),

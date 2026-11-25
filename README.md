@@ -329,7 +329,7 @@ All 751 tests pass.
 
 The person who runs Business OS (you) now has an admin panel at `/admin` in the web app, backed by `/api/v1/admin/*`.
 
-**Who can open it.** Only someone marked as a platform admin **and** with two-step sign-in turned on. Nobody is an admin by default. On a server, run `npm run admin:grant -- you@example.com` (and `npm run admin:revoke -- you@example.com` to take it away). Without two-step sign-in the API answers `PLATFORM_ADMIN_MFA_REQUIRED`; anyone else gets `PLATFORM_ADMIN_ONLY`.
+**Who can open it.** Only someone marked as a platform admin. (At first two-step sign-in was required too; step 11.10 removed that.) Nobody is an admin by default. On a server, sign up in the app first, then run `npm run admin:grant -- you@example.com` (and `npm run admin:revoke -- you@example.com` to take it away). Anyone else gets `PLATFORM_ADMIN_ONLY`.
 
 **What an admin can do.**
 
@@ -487,7 +487,7 @@ Only owners and admins (`business.manage`) can ask for it, with a recent two-ste
 - `POST /admin/payments/:paymentId/reject` with a `reason` (3 to 300 characters): the payment is marked failed with that reason, and the customer is told in the app and by email, and can send it again.
 - `POST /admin/workspaces/:workspaceId/payments` records money received some other way, cash for example: plan, cycle, amount (any discount from the list price is kept), method (`bkash`, `nagad`, `rocket`, `bank`, `cash`, `other`) and an optional reference. It is paid at once, with a receipt.
 
-All of these need a platform admin with two-step sign-in, like the rest of the admin panel.
+All of these need a platform admin, like the rest of the admin panel.
 
 **Errors:** `PAYMENT_CLAIM_OPEN` (409), `MANUAL_PAYMENTS_OFF` (409, when online payment works and paying by hand is switched off), `PAYMENT_NOT_MANUAL` (409, approving an online payment by hand).
 
@@ -498,6 +498,16 @@ All of these need a platform admin with two-step sign-in, like the rest of the a
 **No migration.** The `payments` table already had the gateway, method, transaction reference, failure reason, expiry and who made it.
 
 **How it was checked.** 4 new tests (`tests/manual-payments.test.ts`): switching it on and off and what `pay-info` shows; the whole claim and approve path (the period starts after the trial, the receipt, income, the admin's notification, the audit); rejecting with a reason, sending again, taking it back, another account getting 404, and an online payment refused by hand; and recording a cash payment. All 789 tests pass.
+
+### Step 11.10: The admin panel no longer needs two-step sign-in
+
+**Why.** Turning on two-step sign-in means scanning a QR code with an authenticator app, and that didn't work for us on the live server. The admin panel was locked behind it, so nobody could get in.
+
+**What changed.** `requirePlatformAdmin` now only checks the admin flag (`users.is_platform_admin`), still read from the database on every request. The `PLATFORM_ADMIN_MFA_REQUIRED` error is gone, and `npm run admin:grant` no longer warns about two-step sign-in. Two-step sign-in itself is still there and optional: anyone, admins included, can turn it on in Settings → Security, and actions that ask for a recent code (data export, closing a period, connecting an integration) still ask only people who turned it on.
+
+**The trade-off.** The admin panel can give Pro free, suspend accounts and approve payments, so an admin account is now protected by its password alone. Use a long, unique password for it, and turn two-step on later once it works on the server.
+
+**No migration.** **How it was checked.** The admin test now checks an admin gets in without two-step; all 789 tests pass.
 
 ## What was built in Phase 8
 
@@ -1645,7 +1655,7 @@ docker exec business_os_redis redis-cli flushall
 ## What still needs you
 
 1. **Neon is up to date** (checked 10 Nov 2026 with `npx prisma migrate status`: all 15 migrations applied, through `20261112090000_items`). After a future step adds a migration, run `npm run db:deploy`, then `npm run ledger:verify`.
-   Then make yourself the platform admin: turn on two-step sign-in in the app, and run `npm run admin:grant -- your-email`.
+   Then make yourself the platform admin: sign up in the app, then on the server, in the backend folder, run `npm run admin:grant -- your-email` (or `node dist/scripts/platform-admin.js grant your-email` if `tsx` isn't installed there).
 2. **Get a Groq key** from [console.groq.com](https://console.groq.com), add `AI_API_KEY=...` to `.env`, then run `npm run ai:eval` to see how well it really does, especially in Bangla.
 3. **Keep the worker running.** Reminders, emails, recurring transactions and document reading all depend on it.
 4. **Choose an email provider** before production, and set `SMTP_URL`, `EMAIL_FROM` and `APP_URL`. Without `SMTP_URL`, nothing is emailed, including password resets.
