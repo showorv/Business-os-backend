@@ -257,6 +257,14 @@ describe("all of a business's data", () => {
     expect(transactions[0]).toContain("Amount");
     expect(transactions).toHaveLength(3);
     expect(transactions.some((row) => row.includes(1250000) && row.includes("Sales"))).toBe(true);
+    // Words, not codes, and real dates that sort.
+    expect(transactions[1]).toContain("Posted");
+    expect(transactions[1]![1]).toBeInstanceOf(Date);
+    expect(rows("Customers and suppliers")[1]).toContain("Customer");
+    // The first sheet says when it was made, in the business's time, and what each sheet holds.
+    const about = rows("About").map((row) => row.join(" "));
+    expect(about.some((line) => line.startsWith("Made on") && line.includes("Asia/Dhaka"))).toBe(true);
+    expect(about.some((line) => line.startsWith("Transactions") && line.includes("2 rows"))).toBe(true);
     // A name that looks like a formula stays plain text in a cell.
     expect(rows("Customers and suppliers")[1]).toContain("=Karim");
     expect(rows("Invoice lines")[1]).toEqual(expect.arrayContaining([2, "pcs", 850, 1700, "Sales"]));

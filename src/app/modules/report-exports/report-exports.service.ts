@@ -15,7 +15,7 @@ import {
   type ExportOptions,
   type ReportTable,
 } from "../../exports/reportTable.js";
-import { fromDbDate } from "../../utils/dates.js";
+import { formatDateTime, fromDbDate } from "../../utils/dates.js";
 import { AppError, ErrorCode } from "../../utils/errors.js";
 import { EventType, publishEvent } from "../../utils/outbox.js";
 import type { RequestContext } from "../../utils/requestContext.js";
@@ -130,13 +130,56 @@ const findOrThrow = async (tx: Prisma.TransactionClient, businessId: string, exp
   return row;
 };
 
-const day = (value: Date | null) => (value ? fromDbDate(value) : null);
-const moment = (value: Date | null) => (value ? value.toISOString() : null);
 const percent = (bp: number) => bp / 100;
 
+// Words instead of codes: "PARTIALLY_PAID" reads "Partially paid".
+const WORDS: Record<string, string> = {
+  SALE: "Invoice",
+  BILL: "Bill",
+  BKASH: "bKash",
+  NAGAD: "Nagad",
+  MFS_OTHER: "Other mobile wallet",
+  AI: "AI assistant",
+  TODO: "To do",
+  PENDING_APPROVAL: "Waiting for approval",
+  NET_PROFIT: "Net profit",
+  CASH_BALANCE: "Cash balance",
+};
+const words = (code: string | null) => (code === null ? null : (WORDS[code] ?? code.charAt(0) + code.slice(1).toLowerCase().replaceAll("_", " ")));
+
+// Dates are stored as midnight UTC, which a spreadsheet shows as that same day.
+const day = (value: Date | null) => value;
+// A moment shown as the business's own wall-clock time: the spreadsheet has no timezone of its own.
+const inZone = (timezone: string) => (value: Date | null) => {
+  if (!value) return null;
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" })
+      .formatToParts(value)
+      .map((part) => [part.type, Number(part.value)]),
+  );
+  return new Date(Date.UTC(parts.year!, parts.month! - 1, parts.day!, parts.hour!, parts.minute!, parts.second!));
+};
+
+const DESCRIPTIONS: Record<string, string> = {
+  Accounts: "Cash, bank and mobile wallets, with their balances.",
+  Categories: "Income and expense categories.",
+  "Customers and suppliers": "Everyone the business buys from or sells to.",
+  Items: "Saved items with their usual prices.",
+  Transactions: "Every income, expense and transfer.",
+  "Invoices and bills": "Invoices to customers and bills from suppliers.",
+  "Invoice lines": "What is on each invoice and bill.",
+  "Invoice payments": "Money received for invoices and paid for bills.",
+  "Chart of accounts": "The accounts the books are kept in.",
+  Journal: "Every posting in the books, debit and credit.",
+  Budgets: "Monthly budgets by category.",
+  Goals: "Targets for income, profit or cash.",
+  Tasks: "To-dos and reminders.",
+};
+
 // One sheet per kind of record. Names stand in for ids so the file reads on its own.
-const dataSheets = (business: BusinessContext, about: { name: string; legalName: string | null; currency: string }) =>
+const dataSheets = (business: BusinessContext, aboutInfo: { name: string; legalName: string | null; currency: string }) =>
   withBusinessScope(business, async (tx): Promise<Sheet[]> => {
+    const moment = inZone(business.timezone);
     const where = { businessId: business.businessId };
     const [accounts, categories, contacts, items, transactions, invoices, payments, ledger, entries, budgets, goals, tasks] = await Promise.all([
       tx.financialAccount.findMany({ where, orderBy: { name: "asc" } }),
@@ -163,34 +206,21 @@ const dataSheets = (business: BusinessContext, about: { name: string; legalName:
     const of = (map: Map<string, string>, id: string | null) => (id ? (map.get(id) ?? null) : null);
     const money = true;
 
-    return [
-      {
-        name: "About",
-        columns: [{ label: "Field", width: 24 }, { label: "Value", width: 60 }],
-        rows: [
-          ["Business", about.name],
-          ["Legal name", about.legalName],
-          ["Currency", about.currency],
-          ["Exported at", new Date().toISOString()],
-          ["Amounts", `In ${about.currency}, with two decimals. Invoice and item prices are before VAT.`],
-          ["Dates", "YYYY-MM-DD. Times are UTC."],
-          ["Not included", "Uploaded files (download them from Documents), the activity history, and team members' details."],
-        ],
-      },
+    const tables: Sheet[] = [
       {
         name: "Accounts",
-        columns: [{ label: "Name" }, { label: "Type" }, { label: "Currency" }, { label: "Opening balance", money }, { label: "Opening date" }, { label: "Current balance", money }, { label: "Number" }, { label: "Active" }],
-        rows: accounts.map((row) => [row.name, row.type, row.currency, row.openingBalanceMinor, day(row.openingDate), row.currentBalanceMinor, row.maskedNumber, row.isActive]),
+        columns: [{ label: "Name" }, { label: "Type" }, { label: "Currency" }, { label: "Opening balance", money }, { label: "Opening date", date: "day" }, { label: "Current balance", money }, { label: "Number" }, { label: "Active" }],
+        rows: accounts.map((row) => [row.name, words(row.type), row.currency, row.openingBalanceMinor, day(row.openingDate), row.currentBalanceMinor, row.maskedNumber, row.isActive]),
       },
       {
         name: "Categories",
         columns: [{ label: "Type" }, { label: "Name" }, { label: "Name (Bangla)" }, { label: "Active" }],
-        rows: categories.map((row) => [row.type, row.name, row.nameBn, row.isActive]),
+        rows: categories.map((row) => [words(row.type), row.name, row.nameBn, row.isActive]),
       },
       {
         name: "Customers and suppliers",
         columns: [{ label: "Kind" }, { label: "Name" }, { label: "Company" }, { label: "Phone" }, { label: "Email" }, { label: "Address", width: 40 }, { label: "BIN/TIN" }, { label: "Notes", width: 40 }, { label: "Active" }],
-        rows: contacts.map((row) => [row.kind, row.name, row.company, row.phone, row.email, row.address, row.taxId, row.notes, row.isActive]),
+        rows: contacts.map((row) => [words(row.kind), row.name, row.company, row.phone, row.email, row.address, row.taxId, row.notes, row.isActive]),
       },
       {
         name: "Items",
@@ -199,13 +229,13 @@ const dataSheets = (business: BusinessContext, about: { name: string; legalName:
       },
       {
         name: "Transactions",
-        columns: [{ label: "Number" }, { label: "Date" }, { label: "Type" }, { label: "Status" }, { label: "Account" }, { label: "To account" }, { label: "Category" }, { label: "Customer or supplier" }, { label: "Amount", money }, { label: "Fee", money }, { label: "Currency" }, { label: "Method" }, { label: "Reference" }, { label: "Description", width: 40 }, { label: "Source" }],
-        rows: transactions.map((row) => [row.number, day(row.txnDate), row.type, row.status, of(accountName, row.accountId), of(accountName, row.toAccountId), of(categoryName, row.categoryId), of(contactName, row.contactId), row.amountMinor, row.feeMinor, row.currency, row.paymentMethod, row.referenceNo, row.description, row.source]),
+        columns: [{ label: "Number" }, { label: "Date", date: "day" }, { label: "Type" }, { label: "Status" }, { label: "Account" }, { label: "To account" }, { label: "Category" }, { label: "Customer or supplier" }, { label: "Amount", money }, { label: "Fee", money }, { label: "Currency" }, { label: "Method" }, { label: "Reference" }, { label: "Description", width: 40 }, { label: "Source" }],
+        rows: transactions.map((row) => [row.number, day(row.txnDate), words(row.type), words(row.status), of(accountName, row.accountId), of(accountName, row.toAccountId), of(categoryName, row.categoryId), of(contactName, row.contactId), row.amountMinor, row.feeMinor, row.currency, words(row.paymentMethod), row.referenceNo, row.description, words(row.source)]),
       },
       {
         name: "Invoices and bills",
-        columns: [{ label: "Kind" }, { label: "Number" }, { label: "Status" }, { label: "Customer or supplier" }, { label: "Date" }, { label: "Due date" }, { label: "Subtotal", money }, { label: "VAT", money }, { label: "Total", money }, { label: "Paid", money }, { label: "Reference" }, { label: "Notes", width: 40 }, { label: "Void reason" }],
-        rows: invoices.map((row) => [row.kind, invoiceLabel.get(row.id)!, row.status, of(contactName, row.contactId), day(row.issueDate), day(row.dueDate), row.subtotalMinor, row.vatMinor, row.totalMinor, row.paidMinor, row.referenceNo, row.notes, row.voidReason]),
+        columns: [{ label: "Kind" }, { label: "Number" }, { label: "Status" }, { label: "Customer or supplier" }, { label: "Date", date: "day" }, { label: "Due date", date: "day" }, { label: "Subtotal", money }, { label: "VAT", money }, { label: "Total", money }, { label: "Paid", money }, { label: "Reference" }, { label: "Notes", width: 40 }, { label: "Void reason" }],
+        rows: invoices.map((row) => [words(row.kind), invoiceLabel.get(row.id)!, words(row.status), of(contactName, row.contactId), day(row.issueDate), day(row.dueDate), row.subtotalMinor, row.vatMinor, row.totalMinor, row.paidMinor, row.referenceNo, row.notes, row.voidReason]),
       },
       {
         name: "Invoice lines",
@@ -216,42 +246,62 @@ const dataSheets = (business: BusinessContext, about: { name: string; legalName:
       },
       {
         name: "Invoice payments",
-        columns: [{ label: "Invoice or bill" }, { label: "Date" }, { label: "Account" }, { label: "Amount", money }, { label: "Note", width: 40 }, { label: "Undone" }],
+        columns: [{ label: "Invoice or bill" }, { label: "Date", date: "day" }, { label: "Account" }, { label: "Amount", money }, { label: "Note", width: 40 }, { label: "Undone" }],
         rows: payments.map((row) => [of(invoiceLabel, row.invoiceId), day(row.paidOn), of(accountName, row.accountId), row.amountMinor, row.note, row.voidedAt !== null]),
       },
       {
         name: "Chart of accounts",
         columns: [{ label: "Code" }, { label: "Name", width: 32 }, { label: "Name (Bangla)", width: 32 }, { label: "Type" }, { label: "Normal balance" }, { label: "Active" }],
-        rows: ledger.map((row) => [row.code, row.name, row.nameBn, row.type, row.normalBalance, row.isActive]),
+        rows: ledger.map((row) => [row.code, row.name, row.nameBn, words(row.type), words(row.normalBalance), row.isActive]),
       },
       {
         name: "Journal",
-        columns: [{ label: "Entry" }, { label: "Date" }, { label: "Kind" }, { label: "Memo", width: 40 }, { label: "Line" }, { label: "Account code" }, { label: "Account", width: 32 }, { label: "Debit", money }, { label: "Credit", money }, { label: "Currency" }, { label: "Line memo", width: 32 }],
+        columns: [{ label: "Entry" }, { label: "Date", date: "day" }, { label: "Kind" }, { label: "Memo", width: 40 }, { label: "Line" }, { label: "Account code" }, { label: "Account", width: 32 }, { label: "Debit", money }, { label: "Credit", money }, { label: "Currency" }, { label: "Line memo", width: 32 }],
         rows: entries.flatMap((entry) =>
           entry.lines.map((row) => {
             const account = ledgerById.get(row.ledgerAccountId);
-            return [entry.entryNo, day(entry.entryDate), entry.kind, entry.memo, row.lineNo, account?.code ?? null, account?.name ?? null, row.debitMinor, row.creditMinor, row.currency, row.memo];
+            return [entry.entryNo, day(entry.entryDate), words(entry.kind), entry.memo, row.lineNo, account?.code ?? null, account?.name ?? null, row.debitMinor, row.creditMinor, row.currency, row.memo];
           }),
         ),
       },
       {
         name: "Budgets",
-        columns: [{ label: "Budget" }, { label: "From month" }, { label: "To month" }, { label: "Status" }, { label: "Category" }, { label: "Amount a month", money }, { label: "Alert at %" }],
+        columns: [{ label: "Budget" }, { label: "From month", date: "day" }, { label: "To month", date: "day" }, { label: "Status" }, { label: "Category" }, { label: "Amount a month", money }, { label: "Alert at %" }],
         rows: budgets.flatMap((budget) =>
-          budget.lines.map((row) => [budget.name, day(budget.startMonth), day(budget.endMonth), budget.status, of(categoryName, row.categoryId), row.amountMinor, row.alertPercent]),
+          budget.lines.map((row) => [budget.name, day(budget.startMonth), day(budget.endMonth), words(budget.status), of(categoryName, row.categoryId), row.amountMinor, row.alertPercent]),
         ),
       },
       {
         name: "Goals",
-        columns: [{ label: "Name" }, { label: "Measure" }, { label: "Target", money }, { label: "From month" }, { label: "To month" }, { label: "Status" }, { label: "Reached at" }],
-        rows: goals.map((row) => [row.name, row.metric, row.targetMinor, day(row.startMonth), day(row.endMonth), row.status, moment(row.achievedAt)]),
+        columns: [{ label: "Name" }, { label: "Measure" }, { label: "Target", money }, { label: "From month", date: "day" }, { label: "To month", date: "day" }, { label: "Status" }, { label: "Reached at", date: "time" }],
+        rows: goals.map((row) => [row.name, words(row.metric), row.targetMinor, day(row.startMonth), day(row.endMonth), words(row.status), moment(row.achievedAt)]),
       },
       {
         name: "Tasks",
-        columns: [{ label: "Title", width: 40 }, { label: "Description", width: 40 }, { label: "Priority" }, { label: "Status" }, { label: "Due" }, { label: "Done at" }, { label: "Created at" }],
-        rows: tasks.map((row) => [row.title, row.description, row.priority, row.status, moment(row.dueAt), moment(row.completedAt), moment(row.createdAt)]),
+        columns: [{ label: "Title", width: 40 }, { label: "Description", width: 40 }, { label: "Priority" }, { label: "Status" }, { label: "Due", date: "time" }, { label: "Done at", date: "time" }, { label: "Created at", date: "time" }],
+        rows: tasks.map((row) => [row.title, row.description, words(row.priority), words(row.status), moment(row.dueAt), moment(row.completedAt), moment(row.createdAt)]),
       },
     ];
+
+    const now = new Date();
+    const about: Sheet = {
+      name: "About",
+      notes: true,
+      columns: [{ label: "About this file", width: 28 }, { label: "", width: 80 }],
+      rows: [
+        ["Business", aboutInfo.name],
+        ["Legal name", aboutInfo.legalName ?? "—"],
+        ["Currency", aboutInfo.currency],
+        ["Made on", `${formatDateTime(now, "en", "latin", business.timezone)} (${business.timezone} time)`],
+        ["Amounts", `In ${aboutInfo.currency}, with two decimals. Invoice and item prices are before VAT.`],
+        ["Dates and times", `Real dates, so they sort and filter. Times are ${business.timezone} time.`],
+        ["Not included", "Uploaded files (download them from Documents), the activity history, and team members' details."],
+        [null, null],
+        ["Sheet", "What's in it"],
+        ...tables.map((table): [string, string] => [table.name, `${DESCRIPTIONS[table.name] ?? ""} ${table.rows.length} ${table.rows.length === 1 ? "row" : "rows"}.`.trim()]),
+      ],
+    };
+    return [about, ...tables];
   });
 
 const getOne = (business: BusinessContext, exportId: string) =>

@@ -542,6 +542,19 @@ After the first start you can empty `PLATFORM_ADMIN_PASSWORD`; the admin stays. 
 
 **No migration.** **How it was checked.** The `.env` admin tests now also check the workspace is Pro, given free, with no end date, and that a second run changes nothing. All 791 tests pass.
 
+### Step 11.14: The data download reads like a spreadsheet, not raw data
+
+**Why.** The "all of a business's data" Excel file (step 11.8) was correct but hard to read: "Exported at 2026-11-25T19:15:30.511Z", times in UTC, dates as text, and codes like `POSTED` and `PARTIALLY_PAID`.
+
+**What changed** (`renderWorkbook` and the data sheets in the report-exports service):
+- **The first sheet, About,** says when the file was made in the business's own time ("26 November 2026 at 01:15 (Asia/Dhaka time)"), shows "—" for an empty legal name, and lists every sheet with what's in it and how many rows it has.
+- **Dates are real dates**, shown as "20 Nov 2026", so they sort and filter in Excel, Numbers and Google Sheets. **Times are in the business's timezone**, not UTC.
+- **Words instead of codes:** "Posted", "Partially paid", "Invoice" and "Bill", "bKash", "Waiting for approval", "To do".
+- **Yes and No** instead of "yes" and "no". Every header row is shaded with a line under it and has sort and filter buttons. Long text wraps.
+- Money is still real numbers with two decimals, and text that looks like a formula still stays text.
+
+**No migration.** **How it was checked.** The data export test now also checks a status reads "Posted", a date is a real date, a contact reads "Customer", and the About sheet has the time in Asia/Dhaka and "2 rows" for Transactions. A sample file was rendered and looked over. All 791 tests pass.
+
 ## What was built in Phase 8
 
 **The goal:** ask questions about your business in English or Bangla, and get answers you can trust, with their source.
